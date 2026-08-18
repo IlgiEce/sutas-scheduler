@@ -58,6 +58,7 @@ CIP_SURELERI_DK = {
 
 TANK_KAPASITELERI = {
     "T43": 38.0,
+   #İLGİ ECE ÇAKMAK
     "T40": 25.0,
     "T41": 25.0,
     "T42": 25.0,
