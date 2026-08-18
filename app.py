@@ -1603,10 +1603,40 @@ with st.sidebar:
       "Projeksiyon Excel Dosyası Seçin (.xlsx)", type=["xlsx"]
   )
   st.markdown("---")
-  st.info(
-      "📌 **Kısıt Parametreleri:**\n- P6 Debi: 10 Ton/Sa\n- Kültür Süresi: 1.5"
-      " Sa\n- Tank CIP: 1.0 Sa\n- Mesai: 08:00 - 04:00 (20 Sa)"
-  )
+
+  st.markdown("### 📌 Tesis Kısıt Parametreleri")
+
+  with st.expander("⚡ Pastörizatör & Mayalama", expanded=True):
+    st.markdown("""
+        * **P6 Debi:** 10.0 Ton/Sa
+        * **P6 CIP Limiti:** 100 Ton
+        * **P6 CIP Süresi:** 1.0 Sa (60 dk)
+        * **Kültürleşme (Mayalanma):** 1.5 Sa
+        * **Maks. Kültürlü Bekleme:** 6.0 Sa
+        """)
+
+  with st.expander("⏱️ Vardiya & Makineler", expanded=False):
+    st.markdown("""
+        * **Günlük Mesai:** 08:00 - 04:00 (20 Sa)
+        * **Maks. Ardışık Çalışma:** 8.5 Sa (Sonrası CIP)
+        * **Eşzamanlı Hat Limiti:** 5 Hat (Gündüz/Gece)
+        * **Makine Listesi:** Küçük Kova, Büyük Kova, 132 çap, 160 çap, Grunwald
+        """)
+
+  with st.expander("🧼 CIP Hatları & Yıkama", expanded=False):
+    st.markdown("""
+        * **HAT_1 (Fincan Grubu):** 160 çap (60 dk), 132 çap (60 dk), Grunwald (110 dk)
+        * **HAT_2 (Kova Grubu):** Küçük Kova (60 dk), Büyük Kova (60 dk)
+        * **Tank CIP Süresi:** 1.0 Sa (60 dk)
+        """)
+
+  with st.expander("🛢️ Mayalama Tankları", expanded=False):
+    st.markdown("""
+        * **T43:** 38.0 Ton
+        * **T40:** 25.0 Ton
+        * **T41:** 25.0 Ton
+        * **T42:** 25.0 Ton
+        """)
 
 if uploaded_file is not None:
   if st.button("🚀 Çizelgeyi Oluştur ve Analiz Et", type="primary"):
@@ -1625,7 +1655,10 @@ if uploaded_file is not None:
     st.download_button(
         label="📥 Nihai Excel Çizelgesini İndir (.xlsx)",
         data=results["excel_data"],
-        file_name=f"Sutas_Uretim_Cizelgesi_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+        file_name=(
+            "Sutas_Uretim_Cizelgesi_"
+            f"{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        ),
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
