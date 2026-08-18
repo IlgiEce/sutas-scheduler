@@ -58,8 +58,7 @@ TANK_RENKLERI = {
 
 
 def hiz_matrisini_yukle():
-  #İLGİ ECE ÇAKMAK
-    return {
+  return {
       "160 çap": {
           "750g": {"hiz": 3.024, "sut_tipi": "TAM YAĞLI"},
           "1000g": {"hiz": 3.648, "sut_tipi": "TAM YAĞLI"},
@@ -523,6 +522,7 @@ def run_scheduler_pipeline(
     makine_max_calisma,
     p6_cip_limit,
     p6_cip_suresi,
+    gunluk_mesai_saati=20.0,
 ):
   xls = pd.ExcelFile(excel_source)
   baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
@@ -566,7 +566,7 @@ def run_scheduler_pipeline(
 
   for day_idx, sheet_name in enumerate(xls.sheet_names, 1):
     gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
-    cutoff_0400 = gun_baslangic + datetime.timedelta(hours=20)
+    cutoff_0400 = gun_baslangic + datetime.timedelta(hours=gunluk_mesai_saati)
 
     siparisler = dinamik_projeksiyon_oku(excel_source, sheet_name)
     if not siparisler:
@@ -915,7 +915,7 @@ def run_scheduler_pipeline(
       cur_t = p_start
       while cur_t < p_end:
         h_idx = int((cur_t - gun_baslangic).total_seconds() // 3600)
-        if 0 <= h_idx < 20:
+        if 0 <= h_idx < int(gunluk_mesai_saati):
           next_hour = gun_baslangic + datetime.timedelta(hours=h_idx + 1)
           work_in_this_hour = (
               min(p_end, next_hour) - cur_t
@@ -977,16 +977,18 @@ def run_scheduler_pipeline(
     toplam_eksik_genel += day_unfulfilled
 
     p6_day_pumping_hours = day_realized / p6_debi
-    # Zorunlu CIP ve Hazırlık Süreleri (Planlı Duruş Dahil Efektif Süre)
     p6_cip_count = max(0, int(day_realized // p6_cip_limit))
     p6_cip_hours = p6_cip_count * p6_cip_suresi
-    tank_transition_hours = 0.6  # Tank sıralama & vana geçiş payı
+    tank_transition_hours = 0.6
 
     efektif_mesai_harcanan = min(
-        20.0, p6_day_pumping_hours + p6_cip_hours + tank_transition_hours
+        gunluk_mesai_saati,
+        p6_day_pumping_hours + p6_cip_hours + tank_transition_hours,
     )
     toplam_efektif_doygunluk_saati += efektif_mesai_harcanan
-    efektif_doygunluk_pct = min(100.0, (efektif_mesai_harcanan / 20.0) * 100.0)
+    efektif_doygunluk_pct = min(
+        100.0, (efektif_mesai_harcanan / gunluk_mesai_saati) * 100.0
+    )
 
     gunduz_ekip, gece_ekip = vardiya_ekip_ortalamasi_hesapla(
         machines, gun_baslangic
@@ -1037,7 +1039,9 @@ def run_scheduler_pipeline(
   ort_gerceklesen = toplam_gerceklesen_genel / max(1, gun_sayisi)
   ort_eksik = toplam_eksik_genel / max(1, gun_sayisi)
   genel_efektif_doygunluk = min(
-      100.0, (toplam_efektif_doygunluk_saati / (gun_sayisi * 20.0)) * 100.0
+      100.0,
+      (toplam_efektif_doygunluk_saati / (gun_sayisi * gunluk_mesai_saati))
+      * 100.0,
   )
   genel_uyum = (toplam_gerceklesen_genel / max(0.01, toplam_talep_genel)) * 100
   ort_gunduz_ekip = round(
@@ -1308,8 +1312,8 @@ def run_scheduler_pipeline(
           "🔴 ANA DARBOĞAZ (FİİLİ TAVAN)",
           (
               "P6 süt dolumu ve zorunlu hijyen/CIP süreleriyle birlikte %90+"
-              " doluluğa ulaşır. Kalan <1.8 saatlik sürede 25T'lik asgari tank"
-              " mayalama partisi başlatılamayacağından hat fiilen tam kapasite"
+              " doluluğa ulaşır. Kalan sürede 25T'lik asgari tank mayalama"
+              " partisi başlatılamayacağından hat fiilen tam kapasite"
               " çalışmaktadır."
           ),
       ),
@@ -1600,7 +1604,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (EFEKTİF HAT DOYGUNLUĞU MODELİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (GELİŞMİŞ KISIT & WHAT-IF MİMARİSİ)
 # ==============================================================================
 st.title("🏭 Sütaş Karacabey Yoğurt Hattı Master Scheduler")
 st.markdown(
@@ -1624,6 +1628,7 @@ with st.sidebar:
         max_value=18.0,
         value=10.0,
         step=0.5,
+        help="P6 pastörizatörünün saatlik nominal süt basma debisi.",
     )
     sim_kultur_suresi = st.slider(
         "Mayalama (Kültür) Süresi (Saat)",
@@ -1631,6 +1636,7 @@ with st.sidebar:
         max_value=3.0,
         value=1.5,
         step=0.25,
+        help="Tank dolumu bittikten sonra sütün mayalanıp hazır olma süresi.",
     )
     sim_max_kultur_bekleme = st.slider(
         "Maks. Mayalı Bekleme Limiti (Saat)",
@@ -1638,6 +1644,7 @@ with st.sidebar:
         max_value=10.0,
         value=6.0,
         step=0.5,
+        help="Mayalanan sütün asitleşme/bozulma olmadan tüketilmesi gereken azami süre.",
     )
     sim_p6_cip_limit = st.number_input(
         "P6 CIP Yıkama Limiti (Ton)",
@@ -1645,6 +1652,7 @@ with st.sidebar:
         max_value=200.0,
         value=100.0,
         step=10.0,
+        help="P6'nın aralıksız basabileceği azami tonaj sınırı (aşılınca 1 sa CIP zorunlu).",
     )
     sim_p6_cip_suresi = st.slider(
         "P6 CIP Yıkama Süresi (Saat)",
@@ -1652,23 +1660,66 @@ with st.sidebar:
         max_value=2.0,
         value=1.0,
         step=0.25,
+        help="100T aşıldığında uygulanan ara yıkama süresi.",
     )
 
-  with st.expander("🧼 Tank & Makine CIP Süreleri", expanded=False):
+  with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
+    sim_mesai_saati = st.slider(
+        "Günlük Mesai Penceresi (Saat)",
+        min_value=16.0,
+        max_value=24.0,
+        value=20.0,
+        step=1.0,
+        help="08:00 başlangıçlı vardiya süresi (20 Sa = 04:00 mesai sonu).",
+    )
     sim_tank_cip_suresi = st.slider(
         "Tank CIP Süresi (Saat)",
         min_value=0.5,
         max_value=2.0,
         value=1.0,
         step=0.25,
+        help="Tank boşaldıktan sonra yeni parti doluma kadar geçen kimyasal yıkama süresi.",
     )
     sim_makine_max_calisma = st.slider(
-        "Maks. Ardışık Çalışma Süresi (Saat)",
+        "Maks. Ardışık Makine Çalışması (Saat)",
         min_value=4.0,
         max_value=12.0,
         value=8.5,
         step=0.5,
+        help="Dolum makinelerinin kesintisiz çalışabileceği azami süre (sonrası hat CIP).",
     )
+
+  st.markdown("---")
+  st.header("🔒 3. Sabit Tesis & Fiziksel Kısıtlar")
+
+  with st.expander("🛢️ Mayalama Tank Kapasiteleri", expanded=False):
+    st.markdown("""
+        * **T43:** 38.0 Ton
+        * **T40:** 25.0 Ton
+        * **T41:** 25.0 Ton
+        * **T42:** 25.0 Ton
+        * **Toplam Tesis Mayalama Kapasitesi:** 113.0 Ton
+        * *Kural:* Asgari parti dolum kuralı uygulanır (min. 25T parti).
+        """)
+
+  with st.expander("🧼 Makine CIP Hatları & Yıkama", expanded=False):
+    st.markdown("""
+        * **HAT_1 (Fincan Grubu):** 
+          - 160 çap: 60 dk
+          - 132 çap: 60 dk
+          - Grunwald: 110 dk
+        * **HAT_2 (Kova Grubu):** 
+          - Küçük Kova: 60 dk
+          - Büyük Kova: 60 dk
+        * *Kural:* Aynı hatta bağlı makineler aynı anda CIP'e giremez (kuyruk yönetimi).
+        """)
+
+  with st.expander("👥 Hat & Ekipman Kısıtları", expanded=False):
+    st.markdown("""
+        * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
+        * **Önceliklendirme:** JIT (Just-In-Time) mayalama zinciri
+        * **Hijyen Standardı:** Süt tipi geçişlerinde CIP doğrulaması
+        """)
 
 # Oturum Durumu Kontrolü
 if "results" not in st.session_state:
@@ -1686,6 +1737,7 @@ if uploaded_file is not None:
           makine_max_calisma=sim_makine_max_calisma,
           p6_cip_limit=sim_p6_cip_limit,
           p6_cip_suresi=sim_p6_cip_suresi,
+          gunluk_mesai_saati=sim_mesai_saati,
       )
     st.success("✅ Senaryo optimizasyonu başarıyla tamamlandı!")
 
@@ -1716,7 +1768,7 @@ if st.session_state["results"] is not None:
   tab1, tab2, tab3, tab4 = st.tabs([
       "📊 Yönetici Özeti (KPI)",
       "🔍 Tank & P6 Hazırlık Logu",
-      "📈 Darboğaz & Isı Haritası",
+      "📈 Darboğaz & Efektif Hat Doygunluğu",
       "📅 Günlük Çizelgeler",
   ])
 
