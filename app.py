@@ -7,6 +7,7 @@ from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
+import seaborn as sns
 import streamlit as st
 
 # Sayfa Yapılandırması
@@ -878,7 +879,6 @@ def run_scheduler_pipeline(excel_source):
                 (p_start, p_end, "URETIM")
             )
 
-            # Tank durumunu güncelle: Boşalma ve CIP bitiş saati (max ile korunur)
             tank_states[best_t_name]["bosalma_saati"] = max(
                 tank_states[best_t_name]["bosalma_saati"], p_end
             )
@@ -1262,9 +1262,7 @@ def run_scheduler_pipeline(excel_source):
     for col_letter, w_val in audit_col_widths.items():
         ws_audit.column_dimensions[col_letter].width = w_val
 
-    # ==============================================================================
-    # 3. YENİLENEN DARBOĞAZ & RİSK ANALİZİ SAYFASI (DOLULUK ORANI & 5 İSTASYON)
-    # ==============================================================================
+    # 3. Darboğaz & Risk Analizi Sayfası
     ws_db = wb.create_sheet(title="📈 DARBOĞAZ & RİSK ANALİZİ")
     ws_db.views.sheetView[0].showGridLines = True
     ws_db.merge_cells("A1:G2")
@@ -1370,7 +1368,7 @@ def run_scheduler_pipeline(excel_source):
     for col_letter, w_val in db_col_widths.items():
         ws_db.column_dimensions[col_letter].width = w_val
 
-    # 📊 Figür 3: Güncellenen Yatay Darboğaz & Kapasite Doluluk Barı
+    # 📊 Figür 3: Yatay Bar Grafik
     fig_db1, ax_db1 = plt.subplots(figsize=(10.5, 4.2), dpi=200)
     fig_db1.patch.set_facecolor("#FFFFFF")
     stations = [
@@ -1431,40 +1429,55 @@ def run_scheduler_pipeline(excel_source):
     img_db1.height = 320
     ws_db.add_image(img_db1, "A12")
 
-    # 📊 Figür 4: Heatmap
-    fig_hm, ax_hm = plt.subplots(figsize=(11.5, 3.6), dpi=200)
+    # 📊 Figür 4: Heatmap (Seaborn Hücre Çizgili & Değer Etiketli)
+    fig_hm, ax_hm = plt.subplots(figsize=(11.5, 4.0), dpi=200)
     fig_hm.patch.set_facecolor("#FFFFFF")
+
     hm_data = []
     for m in MAKINE_LISTESI:
         hm_data.append(
-            [
-                round(v / max(1, gun_sayisi), 1)
-                for v in haftalik_saatlik_is_yuku[m]
-            ]
+            [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_is_yuku[m]]
         )
 
+    hm_df = pd.DataFrame(hm_data, index=MAKINE_LISTESI)
     saatler = [
         f"{8+i:02d}:00" if 8 + i < 24 else f"{8+i-24:02d}:00" for i in range(20)
     ]
-    cax = ax_hm.imshow(hm_data, cmap="YlGnBu", aspect="auto")
-    ax_hm.set_xticks(range(20))
-    ax_hm.set_xticklabels(saatler, rotation=45, ha="right", fontsize=8)
-    ax_hm.set_yticks(range(len(MAKINE_LISTESI)))
-    ax_hm.set_yticklabels(MAKINE_LISTESI, fontsize=9)
+    hm_df.columns = saatler
+
+    sns.heatmap(
+        hm_df,
+        cmap="Blues",
+        linewidths=0.8,
+        linecolor="#FFFFFF",
+        ax=ax_hm,
+        cbar_kws={
+            "label": "Ortalama Üretim Hacmi (Ton/Sa)",
+            "fraction": 0.03,
+            "pad": 0.04,
+        },
+        annot=True,
+        fmt=".1f",
+        annot_kws={"size": 7, "weight": "bold"},
+    )
+
     ax_hm.set_title(
-        "Haftalık Ortalama Saatlik Üretim Yoğunluğu Isı Haritası (Heatmap -"
-        " Ton/Sa)",
+        "Haftalık Ortalama Saatlik Üretim Yoğunluğu Isı Haritası (Heatmap - Ton/Sa)",
         fontsize=11,
         fontweight="bold",
-        pad=12,
+        pad=14,
     )
     ax_hm.set_xlabel(
         "Günün Saatleri (08:00 - 04:00 Mesai Penceresi)",
         fontsize=9,
         fontweight="bold",
+        labelpad=8,
     )
-    ax_hm.set_ylabel("Üretim Makineleri", fontsize=9, fontweight="bold")
-    fig_hm.colorbar(cax, ax=ax_hm, fraction=0.03, pad=0.04)
+    ax_hm.set_ylabel(
+        "Üretim Makineleri", fontsize=9, fontweight="bold", labelpad=8
+    )
+    ax_hm.tick_params(axis="x", rotation=45, labelsize=8)
+    ax_hm.tick_params(axis="y", rotation=0, labelsize=9)
 
     plt.tight_layout()
     buf_hm = io.BytesIO()
@@ -1473,7 +1486,7 @@ def run_scheduler_pipeline(excel_source):
     buf_hm.seek(0)
     img_hm = OpenpyxlImage(buf_hm)
     img_hm.width = 960
-    img_hm.height = 300
+    img_hm.height = 320
     ws_db.add_image(img_hm, "A27")
 
     # 4. Günlük Çizelgeler
@@ -1680,13 +1693,13 @@ if uploaded_file is not None:
 
         st.success("✅ Üretim çizelgelemesi başarıyla tamamlandı!")
 
-        # Metrik Kartları (OEE yerine Kapasite Doluluk Oranı)
         col1, col2, col3 = st.columns(3)
         col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
-        col2.metric("P6 Pastörizatör Doluluk Oranı", f"%{results['genel_p6_oee']:.1f}")
+        col2.metric(
+            "P6 Pastörizatör Doluluk Oranı", f"%{results['genel_p6_oee']:.1f}"
+        )
         col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
 
-        # İndirme Butonu
         st.download_button(
             label="📥 Nihai Excel Çizelgesini İndir (.xlsx)",
             data=results["excel_data"],
@@ -1694,10 +1707,11 @@ if uploaded_file is not None:
                 "Sutas_Uretim_Cizelgesi_"
                 f"{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
             ),
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            mime=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
         )
 
-        # Sekmeli Dashboard Arayüzü
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Yönetici Özeti (KPI)",
             "🔍 Tank & P6 Hazırlık Logu",
@@ -1726,7 +1740,8 @@ if uploaded_file is not None:
                 list(results["gunluk_cizelgeler"].keys()),
             )
             st.dataframe(
-                results["gunluk_cizelgeler"][selected_day], use_container_width=True
+                results["gunluk_cizelgeler"][selected_day],
+                use_container_width=True,
             )
 else:
     st.warning(
