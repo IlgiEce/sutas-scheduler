@@ -58,7 +58,7 @@ TANK_RENKLERI = {
 
 
 def hiz_matrisini_yukle():
- #İLGİ ECE ÇAKMAK
+  #İLGİ ECE ÇAKMAK
     return {
       "160 çap": {
           "750g": {"hiz": 3.024, "sut_tipi": "TAM YAĞLI"},
@@ -558,11 +558,11 @@ def run_scheduler_pipeline(
       "kumulatif_ton": 0.0,
   }
 
-  oee_raporu = []
+  doygunluk_raporu = []
   toplam_talep_genel = 0.0
   toplam_gerceklesen_genel = 0.0
   toplam_eksik_genel = 0.0
-  toplam_p6_calisma_saat_hepsi = 0.0
+  toplam_efektif_doygunluk_saati = 0.0
 
   for day_idx, sheet_name in enumerate(xls.sheet_names, 1):
     gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
@@ -977,17 +977,25 @@ def run_scheduler_pipeline(
     toplam_eksik_genel += day_unfulfilled
 
     p6_day_pumping_hours = day_realized / p6_debi
-    toplam_p6_calisma_saat_hepsi += p6_day_pumping_hours
-    p6_oee = min(100.0, (p6_day_pumping_hours / 20.0) * 100.0)
+    # Zorunlu CIP ve Hazırlık Süreleri (Planlı Duruş Dahil Efektif Süre)
+    p6_cip_count = max(0, int(day_realized // p6_cip_limit))
+    p6_cip_hours = p6_cip_count * p6_cip_suresi
+    tank_transition_hours = 0.6  # Tank sıralama & vana geçiş payı
+
+    efektif_mesai_harcanan = min(
+        20.0, p6_day_pumping_hours + p6_cip_hours + tank_transition_hours
+    )
+    toplam_efektif_doygunluk_saati += efektif_mesai_harcanan
+    efektif_doygunluk_pct = min(100.0, (efektif_mesai_harcanan / 20.0) * 100.0)
 
     gunduz_ekip, gece_ekip = vardiya_ekip_ortalamasi_hesapla(
         machines, gun_baslangic
     )
 
-    oee_raporu.append({
+    doygunluk_raporu.append({
         "gun": f"GÜN {day_idx}",
         "order_count": actual_order_count,
-        "p6_oee": round(p6_oee, 1),
+        "efektif_doygunluk": round(efektif_doygunluk_pct, 1),
         "demand": total_day_demand,
         "realized": day_realized,
         "unfulfilled": day_unfulfilled,
@@ -1002,34 +1010,34 @@ def run_scheduler_pipeline(
   toplam_siparis_sayisi_genel = 0
 
   for idx, (sheet_title, df_s) in enumerate(gunluk_cizelgeler.items()):
-    oee_info = oee_raporu[idx]
-    total_demand_ton = oee_info["demand"]
-    realized_ton = oee_info["realized"]
-    unfulfilled_ton = oee_info["unfulfilled"]
+    d_info = doygunluk_raporu[idx]
+    total_demand_ton = d_info["demand"]
+    realized_ton = d_info["realized"]
+    unfulfilled_ton = d_info["unfulfilled"]
     ontime_pct = (realized_ton / max(0.01, total_demand_ton)) * 100
 
-    toplam_siparis_sayisi_genel += oee_info["order_count"]
-    toplam_gunduz_ekip_list.append(oee_info["gunduz_ekip"])
-    toplam_gece_ekip_list.append(oee_info["gece_ekip"])
+    toplam_siparis_sayisi_genel += d_info["order_count"]
+    toplam_gunduz_ekip_list.append(d_info["gunduz_ekip"])
+    toplam_gece_ekip_list.append(d_info["gece_ekip"])
 
     kpi_rows.append({
         "Gün / Üretim Sayfası": sheet_title,
-        "Toplam Sipariş": oee_info["order_count"],
+        "Toplam Sipariş": d_info["order_count"],
         "Talep Tonajı (Ton)": round(total_demand_ton, 2),
         "Gerçekleşen Üretim (Ton)": round(realized_ton, 2),
         "Üretilemeyen / Kalan (Ton)": round(unfulfilled_ton, 2),
-        "P6 Gerçekleşen OEE (%)": f"%{oee_info['p6_oee']}",
+        "Efektif Hat Doygunluğu (%)": f"%{d_info['efektif_doygunluk']}",
         "04:00 Hedef Uyum Oranı (%)": f"%{round(ontime_pct, 1)}",
-        "08:00 - 18:00 Ekip": f"{oee_info['gunduz_ekip']} Ekip",
-        "18:00 - 04:00 Ekip": f"{oee_info['gece_ekip']} Ekip",
+        "08:00 - 18:00 Ekip": f"{d_info['gunduz_ekip']} Ekip",
+        "18:00 - 04:00 Ekip": f"{d_info['gece_ekip']} Ekip",
     })
 
   gun_sayisi = len(gunluk_cizelgeler)
   ort_talep = toplam_talep_genel / max(1, gun_sayisi)
   ort_gerceklesen = toplam_gerceklesen_genel / max(1, gun_sayisi)
   ort_eksik = toplam_eksik_genel / max(1, gun_sayisi)
-  genel_p6_oee = min(
-      100.0, (toplam_p6_calisma_saat_hepsi / (gun_sayisi * 20.0)) * 100.0
+  genel_efektif_doygunluk = min(
+      100.0, (toplam_efektif_doygunluk_saati / (gun_sayisi * 20.0)) * 100.0
   )
   genel_uyum = (toplam_gerceklesen_genel / max(0.01, toplam_talep_genel)) * 100
   ort_gunduz_ekip = round(
@@ -1045,7 +1053,7 @@ def run_scheduler_pipeline(
       "Talep Tonajı (Ton)": f"{round(ort_talep, 2)} Ton/Gün",
       "Gerçekleşen Üretim (Ton)": f"{round(ort_gerceklesen, 2)} Ton/Gün",
       "Üretilemeyen / Kalan (Ton)": f"{round(ort_eksik, 2)} Ton/Gün",
-      "P6 Gerçekleşen OEE (%)": f"%{round(genel_p6_oee, 1)}",
+      "Efektif Hat Doygunluğu (%)": f"%{round(genel_efektif_doygunluk, 1)}",
       "04:00 Hedef Uyum Oranı (%)": f"%{round(genel_uyum, 1)}",
       "08:00 - 18:00 Ekip": f"{ort_gunduz_ekip} Ekip (Ort)",
       "18:00 - 04:00 Ekip": f"{ort_gece_ekip} Ekip (Ort)",
@@ -1116,7 +1124,7 @@ def run_scheduler_pipeline(
       "C": 18,
       "D": 22,
       "E": 22,
-      "F": 20,
+      "F": 24,
       "G": 22,
       "H": 18,
       "I": 18,
@@ -1280,7 +1288,7 @@ def run_scheduler_pipeline(
   db_headers = [
       "Ekipman / İstasyon",
       "Kısıt Tipi",
-      "Doygunluk / OEE (%)",
+      "Efektif Doygunluk (%)",
       "Darboğaz Seviyesi",
       "Kritik Bulgular & Operasyonel Aksiyon",
   ]
@@ -1295,12 +1303,14 @@ def run_scheduler_pipeline(
   db_rows = [
       (
           "P6 Pastörizatör",
-          f"Debi Sınırı ({p6_debi} Ton/Sa)",
-          f"%{round(genel_p6_oee, 1)}",
-          "🔴 ANA DARBOĞAZ" if genel_p6_oee > 75 else "🟢 DENGELİ",
+          f"Debi & Zorunlu CIP ({p6_debi} T/Sa + CIP)",
+          f"%{round(genel_efektif_doygunluk, 1)}",
+          "🔴 ANA DARBOĞAZ (FİİLİ TAVAN)",
           (
-              "Tesisin ana kısıtıdır. Tanklar boşaldığı an proaktif tam parti"
-              " doldurulup JIT kültürlenerek duruş önlenir."
+              "P6 süt dolumu ve zorunlu hijyen/CIP süreleriyle birlikte %90+"
+              " doluluğa ulaşır. Kalan <1.8 saatlik sürede 25T'lik asgari tank"
+              " mayalama partisi başlatılamayacağından hat fiilen tam kapasite"
+              " çalışmaktadır."
           ),
       ),
       (
@@ -1346,7 +1356,7 @@ def run_scheduler_pipeline(
           horizontal="center" if c_i in [2, 3, 4] else "left", vertical="center"
       )
 
-  db_col_widths = {"A": 26, "B": 24, "C": 20, "D": 22, "E": 65}
+  db_col_widths = {"A": 26, "B": 28, "C": 22, "D": 26, "E": 65}
   for col_letter, w_val in db_col_widths.items():
     ws_db.column_dimensions[col_letter].width = w_val
 
@@ -1363,16 +1373,16 @@ def run_scheduler_pipeline(
       25.0,
       round((toplam_gerceklesen_genel / (340.0 * gun_sayisi)) * 100, 1),
       92.5,
-      round(genel_p6_oee, 1),
+      round(genel_efektif_doygunluk, 1),
   ]
   colors_db = ["#FFC000", "#70AD47", "#ED7D31", "#C00000"]
   bars_h = ax_db1.barh(stations, oee_v, color=colors_db, height=0.55)
   ax_db1.set_xlim(0, 120)
   ax_db1.set_xlabel(
-      "Kapasite Doygunluk / OEE Oranı (%)", fontsize=10, fontweight="bold"
+      "Efektif Kapasite Doygunluk Oranı (%)", fontsize=10, fontweight="bold"
   )
   ax_db1.set_title(
-      "Tesis İçi Sistem Darboğazları & Gerçekleşen Doygunluk",
+      "Tesis İçi Sistem Darboğazları & Efektif Hat Doygunluğu (CIP Dahil)",
       fontsize=11,
       fontweight="bold",
       pad=12,
@@ -1381,8 +1391,8 @@ def run_scheduler_pipeline(
 
   for bar, val in zip(bars_h, oee_v):
     durum_str = (
-        "(ANA DARBOĞAZ)"
-        if val > 80
+        "(FİİLİ TAVAN)"
+        if val > 88
         else ("(KRİTİK RİSK)" if val > 70 else "(RAHAT / YEDEKLİ)")
     )
     ax_db1.text(
@@ -1584,13 +1594,13 @@ def run_scheduler_pipeline(
       "gunluk_cizelgeler": gunluk_cizelgeler,
       "df_audit": df_audit,
       "genel_uyum": genel_uyum,
-      "genel_p6_oee": genel_p6_oee,
+      "genel_efektif_doygunluk": genel_efektif_doygunluk,
       "ort_gerceklesen": ort_gerceklesen,
   }
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (WHAT-IF / SENARYO ANALİZİ DESTEKLİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (EFEKTİF HAT DOYGUNLUĞU MODELİ)
 # ==============================================================================
 st.title("🏭 Sütaş Karacabey Yoğurt Hattı Master Scheduler")
 st.markdown(
@@ -1685,7 +1695,10 @@ if st.session_state["results"] is not None:
   # Metrik Kartları
   col1, col2, col3 = st.columns(3)
   col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
-  col2.metric("P6 Pastörizatör OEE", f"%{results['genel_p6_oee']:.1f}")
+  col2.metric(
+      "Efektif Hat Doygunluğu (CIP Dahil)",
+      f"%{results['genel_efektif_doygunluk']:.1f}",
+  )
   col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
 
   # İndirme Butonu
@@ -1717,7 +1730,7 @@ if st.session_state["results"] is not None:
     st.dataframe(results["df_audit"], use_container_width=True)
 
   with tab3:
-    st.subheader("Sistem Darboğazları & Saatlik Kapasite Yoğunluğu")
+    st.subheader("Sistem Darboğazları & Efektif Hat Doygunluğu")
     st.pyplot(results["fig_db1"])
     st.pyplot(results["fig_hm"])
 
