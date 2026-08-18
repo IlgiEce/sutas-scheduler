@@ -1660,7 +1660,7 @@ with st.sidebar:
 
     with st.expander("🧼 CIP Hatları & Yıkama", expanded=False):
         st.markdown("""
-            * **HAT_1 (Fincan Grubu):** 160 çap (60 dk), 132 çap (60 dk), Grunwald (110 dk)
+            * **HAT_1 (Kase Grubu):** 160 çap (60 dk), 132 çap (60 dk), Grunwald (110 dk)
             * **HAT_2 (Kova Grubu):** Küçük Kova (60 dk), Büyük Kova (60 dk)
             * **Tank CIP Süresi:** 1.0 Sa (60 dk)
             """)
