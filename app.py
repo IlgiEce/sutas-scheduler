@@ -1608,7 +1608,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (GELİŞMİŞ KISIT & WHAT-IF MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (KASE GRUBU & WHAT-IF MİMARİSİ)
 # ==============================================================================
 st.title("🏭 Sütaş Karacabey Yoğurt Hattı Master Scheduler")
 st.markdown(
@@ -1708,7 +1708,7 @@ with st.sidebar:
 
   with st.expander("🧼 Makine CIP Hatları & Yıkama", expanded=False):
     st.markdown("""
-        * **HAT_1 (Fincan Grubu):** 
+        * **HAT_1 (Kase Grubu):** 
           - 160 çap: 60 dk
           - 132 çap: 60 dk
           - Grunwald: 110 dk
