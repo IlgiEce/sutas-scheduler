@@ -2,6 +2,7 @@ import datetime
 import io
 import os
 import matplotlib.dates as mdates
+import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import openpyxl
@@ -2229,65 +2230,92 @@ if st.session_state["results"] is not None:
       
       df_gantt_filtered = df_gantt_all[df_gantt_all["gun_adi"] == secilen_gantt_gun]
       
-      # Günlük Özet Metrik Kartları
       g_tonaj = df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum()
       g_parti = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"])
       g_ariza = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] == "DURUŞ"])
       
       cg1, cg2, cg3, cg4 = st.columns(4)
-      cg1.metric("Toplam Üretim", f"{g_tonaj:.1f} Ton")
-      cg2.metric("Toplam Üretim Partisi", f"{g_parti} Parti")
-      cg3.metric("Aktif Çalışan Hat", f"{df_gantt_filtered['Makine'].nunique()} Makine")
+      cg1.metric("Toplam Gerçekleşen Üretim", f"{g_tonaj:.1f} Ton")
+      cg2.metric("Üretilen Parti Sayısı", f"{g_parti} Parti")
+      cg3.metric("Aktif Çalışan Hat Sayısı", f"{df_gantt_filtered['Makine'].nunique()} Hat")
       cg4.metric("Duruş / Arıza Durumu", f"{'1 Kesinti ⚠️' if g_ariza > 0 else 'Kesintisiz 🟢'}")
       
-      # Matplotlib Gantt Çizimi
-      fig_gantt_dyn, ax_gd = plt.subplots(figsize=(12, 4.4), dpi=200)
-      fig_gantt_dyn.patch.set_facecolor("#FFFFFF")
+      # 🚀 Ultra-Modern Executive Matplotlib Gantt Çizimi
+      fig_gantt_dyn, ax_gd = plt.subplots(figsize=(14, 5.2), dpi=200)
+      fig_gantt_dyn.patch.set_facecolor("#FAFAFC")
+      ax_gd.set_facecolor("#FFFFFF")
       
-      renk_haritasi = {
-          "TAM YAĞLI": "#1F4E78",
-          "YARIM YAĞLI": "#2E6BA8",
-          "%5 YAĞLI": "#8EAF9D",
-          "PAKSÜT": "#FFC000",
-          "DURUŞ": "#C00000",
+      m_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
+      
+      # Kulvar Arka Planları (Zebra Swimlanes)
+      for i in range(len(MAKINE_LISTESI)):
+        if i % 2 == 0:
+          ax_gd.axhspan(i - 0.45, i + 0.45, color="#F4F6F9", zorder=0)
+
+      palette = {
+          "TAM YAĞLI": {"fill": "#1F4E78", "edge": "#14324E"},
+          "YARIM YAĞLI": {"fill": "#2E75B6", "edge": "#1F4E78"},
+          "%5 YAĞLI": {"fill": "#548235", "edge": "#385723"},
+          "PAKSÜT": {"fill": "#C55A11", "edge": "#833C0C"},
+          "DURUŞ": {"fill": "#C00000", "edge": "#7C0000"},
       }
-      m_idx_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
       
       g_start_min = df_gantt_filtered["dt_start"].min()
       g_end_max = g_start_min + datetime.timedelta(hours=results["mesai_h"])
 
       for _, row in df_gantt_filtered.iterrows():
         m_name = row["Makine"]
-        if m_name in m_idx_map:
-          y_pos = m_idx_map[m_name]
-          start_num = mdates.date2num(row["dt_start"])
-          end_num = mdates.date2num(row["dt_end"])
-          dur = end_num - start_num
-          c = renk_haritasi.get(row["Süt Tipi"], "#3A404A")
-          ax_gd.barh(y_pos, dur, left=start_num, height=0.55, color=c, edgecolor="white", linewidth=1.2)
+        if m_name in m_map:
+          y = m_map[m_name]
+          s_num = mdates.date2num(row["dt_start"])
+          e_num = mdates.date2num(row["dt_end"])
+          dur = e_num - s_num
+          st_val = row["Süt Tipi"]
+          col_info = palette.get(st_val, {"fill": "#595959", "edge": "#262626"})
+          
+          # Yuvarlatılmış Şık Kart Blokları
+          rect = patches.FancyBboxPatch(
+              (s_num, y - 0.28), dur, 0.56,
+              boxstyle="round,pad=0.01,rounding_size=0.03",
+              facecolor=col_info["fill"],
+              edgecolor=col_info["edge"],
+              linewidth=1.2,
+              zorder=3
+          )
+          ax_gd.add_patch(rect)
           
           if (row["dt_end"] - row["dt_start"]).total_seconds() >= 2400:
-            mid_x = start_num + dur / 2
-            lbl = f"{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA"
-            ax_gd.text(mid_x, y_pos, lbl, ha="center", va="center", color="white", fontsize=8, fontweight="bold")
+            mid_x = s_num + dur / 2
+            lbl = f"{row['Sipariş ID']}\n{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA\nKESİNTİSİ"
+            ax_gd.text(mid_x, y, lbl, ha="center", va="center", color="white", fontsize=8, fontweight="bold", zorder=4)
 
       ax_gd.set_yticks(range(len(MAKINE_LISTESI)))
-      ax_gd.set_yticklabels(MAKINE_LISTESI, fontsize=9.5, fontweight="bold")
+      ax_gd.set_yticklabels(MAKINE_LISTESI, fontsize=10, fontweight="bold", color="#1F4E78")
       ax_gd.invert_yaxis()
-      ax_gd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-      ax_gd.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-      ax_gd.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
-      ax_gd.set_title(f"🏭 {secilen_gantt_gun} Günü Master Üretim Gantt Şeması", fontsize=11, fontweight="bold", pad=14)
-      ax_gd.set_xlabel("Vardiya Zaman Çizgisi (Saat)", fontsize=10, fontweight="bold", labelpad=8)
-      ax_gd.grid(axis="x", linestyle="--", alpha=0.5)
-
-      patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in renk_haritasi.values()]
-      ax_gd.legend(patches, renk_haritasi.keys(), loc="upper right", fontsize=8, framealpha=0.9)
       
+      ax_gd.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
+      ax_gd.xaxis.set_major_locator(mdates.HourLocator(interval=1))
+      ax_gd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+      plt.setp(ax_gd.get_xticklabels(), rotation=0, fontsize=8.5, fontweight="bold", color="#333333")
+
+      # Vardiya Değişim Çizgisi (18:00)
+      shift_time = g_start_min + datetime.timedelta(hours=10)
+      ax_gd.axvline(mdates.date2num(shift_time), color="#C00000", linestyle="--", linewidth=1.5, zorder=2)
+      
+      ax_gd.grid(axis="x", color="#E0E4E8", linestyle=":", linewidth=1, zorder=1)
+      ax_gd.set_xlabel("Vardiya Saatleri (08:00 Başlangıçlı 20 Saatlik Üretim Penceresi)", fontsize=10, fontweight="bold", color="#1F4E78", labelpad=10)
+      ax_gd.set_title(f"🏭 {secilen_gantt_gun} Günü Master Üretim & Çizelgeleme Gantt Şeması", fontsize=12, fontweight="bold", color="#1F4E78", pad=15)
+
+      # Üst Lejant (Legend)
+      legend_elements = [
+          patches.Patch(facecolor=v["fill"], edgecolor=v["edge"], label=k) for k, v in palette.items() if k != "DURUŞ"
+      ]
+      legend_elements.append(patches.Patch(facecolor="#C00000", edgecolor="#7C0000", label="DURUŞ / ARIZA"))
+      ax_gd.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1, 1.15), ncol=5, frameon=True, facecolor="#FFFFFF", edgecolor="#D9D9D9", fontsize=8.5)
+
       plt.tight_layout()
       st.pyplot(fig_gantt_dyn)
       
-      # Gantt Detay Tablosu
       with st.expander(f"📋 {secilen_gantt_gun} Günü Zaman Çizelgesi Akış Tablosu", expanded=False):
         gantt_table_df = df_gantt_filtered[["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Makine", "Tahsis Tank", "Başlangıç", "Bitiş"]].copy()
         st.dataframe(gantt_table_df, use_container_width=True)
