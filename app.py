@@ -1441,6 +1441,50 @@ with st.sidebar:
         else:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
+    st.markdown("---")
+    st.header("🔒 4. Sabit Tesis & Fiziksel Kısıtlar")
+
+    with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
+        st.markdown("""
+        * **T43:** 38.0 Ton
+        * **T40:** 25.0 Ton
+        * **T41:** 25.0 Ton
+        * **T42:** 25.0 Ton
+        * **Toplam Kapasite:** 113.0 Ton
+        * **Asgari Parti Kuralı:** Tanklar boşaldığında minimum 25 Ton parti büyüklüğüyle doldurulur (tam parti mayalama prensibi).
+        """)
+
+    with st.expander("🧼 Makine CIP Yıkama Hatları", expanded=False):
+        st.markdown("""
+        * **HAT_1 (Kase Grubu):**
+          * **160 çap:** 60 dk yıkama
+          * **132 çap:** 60 dk yıkama
+          * **Grunwald:** 110 dk yıkama
+        * **HAT_2 (Kova Grubu):**
+          * **Küçük Kova:** 60 dk yıkama
+          * **Büyük Kova:** 60 dk yıkama
+        * **Kural:** Aynı CIP hattına bağlı makineler aynı anda yıkamaya giremez. Yıkama kuyruğu sıralı yönetilir.
+        """)
+
+    with st.expander("⚡ Makine Hız Matrisi (Nominal)", expanded=False):
+        st.markdown("""
+        * **Küçük Kova:** 10 KG (6.77 T/Sa) | 5 KG (5.64 T/Sa)
+        * **Büyük Kova:** 10 KG (5.42 T/Sa) | 2 KG (3.19 T/Sa)
+        * **160 çap:** 1000g (3.65 T/Sa) | 1250g (4.08 T/Sa) | 1500g (4.03 T/Sa)
+        * **132 çap:** 500g (2.46 T/Sa) | 600g (2.95 T/Sa) | 650g (3.19 T/Sa)
+        * **Grunwald:** 75 çap (2.12 T/Sa) | 95 çap (1.63 T/Sa) | 150g (1.84 T/Sa)
+        """)
+
+    with st.expander("👥 Hat & Operatör İşgücü Katsayıları", expanded=False):
+        st.markdown("""
+        * **160 çap:** 4.0 Operatör/Saat
+        * **132 çap:** 5.0 Operatör/Saat
+        * **Grunwald:** 3.0 Operatör/Saat (95 çap: 5.0)
+        * **Küçük Kova:** 5.0 Operatör/Saat
+        * **Büyük Kova:** 6.0 Operatör/Saat
+        * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
+        """)
+
 if "results" not in st.session_state:
     st.session_state["results"] = None
 
