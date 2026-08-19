@@ -802,7 +802,6 @@ def run_scheduler_pipeline(
           "rem_ton": s["tonaj_ton"],
       })
 
-    # Orijinal sıralama stratejisi
     if "Geçiş" in opt_mode:
       order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"]))
     elif "Makespan" in opt_mode:
@@ -1902,7 +1901,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (HIZLI BUTON VE SEGMENTED KONTROLLÜ)
+# STREAMLIT KULLANICI ARAYÜZÜ (TAM DSS VE OPTİMİZASYON MİMARİSİ)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -2191,6 +2190,7 @@ if st.session_state["results"] is not None:
     st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
 
     with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
+      # 1. Kullanıcının O An Girdiği Aktif Senaryo
       res_curr = results
 
       # 2. Maksimum P6 Kapasite Önerisi (18.0 T/Sa)
@@ -2275,6 +2275,7 @@ if st.session_state["results"] is not None:
     df_comp = pd.DataFrame(comp_data)
     st.dataframe(df_comp, use_container_width=True)
 
+    # Dinamik Yatırım & ROI Açıklama Rozeti
     kurtarilan_p6_ton = max(0.0, res_curr['toplam_eksik_genel'] - res_max_p6['toplam_eksik_genel'])
     kurtarilan_p6_tl = kurtarilan_p6_ton * 1000.0 * sim_birim_fiyat
 
