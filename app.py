@@ -1579,38 +1579,70 @@ def run_scheduler_pipeline(
   img_db1.height = 320
   ws_db.add_image(img_db1, "A11")
 
-  # 📊 Figür 4: Heatmap (Dinamik Mesai Boyutu)
-  fig_hm, ax_hm = plt.subplots(figsize=(11.5, 3.6), dpi=200)
+  # 📊 Figür 4: Heatmap (Fotoğraf 1 ile Birebir: Beyaz Çerçeveli, Sayı Etiketli ve Blues Paletli)
+  fig_hm, ax_hm = plt.subplots(figsize=(12, 3.8), dpi=200)
   fig_hm.patch.set_facecolor("#FFFFFF")
-  hm_data = []
-  for m in MAKINE_LISTESI:
-    hm_data.append(
-        [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_is_yuku[m]]
-    )
+  hm_data = np.array([
+      [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_is_yuku[m]]
+      for m in MAKINE_LISTESI
+  ])
 
   saatler = [
       f"{8+i:02d}:00" if 8 + i < 24 else f"{8+i-24:02d}:00"
       for i in range(mesai_h)
   ]
-  cax = ax_hm.imshow(hm_data, cmap="YlGnBu", aspect="auto")
-  ax_hm.set_xticks(range(mesai_h))
-  ax_hm.set_xticklabels(saatler, rotation=45, ha="right", fontsize=8)
-  ax_hm.set_yticks(range(len(MAKINE_LISTESI)))
-  ax_hm.set_yticklabels(MAKINE_LISTESI, fontsize=9)
+  max_val = np.max(hm_data) if hm_data.size > 0 and np.max(hm_data) > 0 else 5.0
+
+  # pcolor ile beyaz kenarlıklar (edgecolors='white')
+  cax = ax_hm.pcolor(
+      hm_data, cmap="Blues", edgecolors="white", linewidths=1.5, vmin=0, vmax=max_val
+  )
+
+  # Eksenleri hücre ortalarına hizalama
+  ax_hm.set_xticks(np.arange(mesai_h) + 0.5)
+  ax_hm.set_xticklabels(saatler, rotation=45, ha="right", fontsize=9, fontweight="bold")
+  ax_hm.set_yticks(np.arange(len(MAKINE_LISTESI)) + 0.5)
+  ax_hm.set_yticklabels(MAKINE_LISTESI, fontsize=10, fontweight="bold")
+
+  # Y eksenini yukarıdan aşağıya (Küçük Kova üstte) sıralama
+  ax_hm.invert_yaxis()
+
+  # Hücre içine tonaj sayılarını yazdırma (Kontrastlı renk yönetimi)
+  for y in range(len(MAKINE_LISTESI)):
+    for x in range(mesai_h):
+      val = hm_data[y, x]
+      text_color = "white" if val > (max_val * 0.45) else "black"
+      ax_hm.text(
+          x + 0.5,
+          y + 0.5,
+          f"{val:.1f}",
+          ha="center",
+          va="center",
+          color=text_color,
+          fontsize=9,
+          fontweight="bold",
+      )
+
   ax_hm.set_title(
-      "Haftalık Ortalama Saatlik Üretim Yoğunluğu Isı Haritası (Heatmap -"
-      " Ton/Sa)",
+      "Haftalık Ortalama Saatlik Üretim Yoğunluğu Isı Haritası (Heatmap - Ton/Sa)",
       fontsize=11,
       fontweight="bold",
-      pad=12,
+      pad=14,
   )
   ax_hm.set_xlabel(
-      f"Günün Saatleri (08:00 Başlangıçlı {mesai_h} Saatlik Mesai Penceresi)",
-      fontsize=9,
+      f"Günün Saatleri (08:00 - 04:00 Mesai Penceresi)",
+      fontsize=10,
       fontweight="bold",
+      labelpad=8,
   )
-  ax_hm.set_ylabel("Üretim Makineleri", fontsize=9, fontweight="bold")
-  fig_hm.colorbar(cax, ax=ax_hm, fraction=0.03, pad=0.04)
+  ax_hm.set_ylabel("Üretim Makineleri", fontsize=10, fontweight="bold")
+
+  cbar = fig_hm.colorbar(cax, ax=ax_hm, fraction=0.025, pad=0.03)
+  cbar.set_label("Ortalama Üretim Hacmi (Ton/Sa)", fontsize=9, fontweight="bold")
+  cbar.outline.set_visible(False)
+
+  for spine in ax_hm.spines.values():
+    spine.set_visible(False)
 
   plt.tight_layout()
   buf_hm = io.BytesIO()
