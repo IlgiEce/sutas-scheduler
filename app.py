@@ -766,7 +766,7 @@ def run_scheduler_pipeline(
         for m in MAKINE_LISTESI
     }
 
-    # ARIZA HESAPLAMASI (GÜN VE SAAT DİNAMİK)
+    # ARIZA HESAPLAMASI
     is_ariza_gunu = ariza_aktif and (sheet_name.lower().strip() == ariza_gun.lower().strip())
     b_start = None
     b_end = None
@@ -1098,7 +1098,6 @@ def run_scheduler_pipeline(
       schedule.append(satir_verisi)
       all_schedule_rows.append(satir_verisi)
 
-      # İŞGÜCÜ HESAPLAMASI (REÇETE & MAKİNE BAZLI KESİN KATSAYILAR)
       op_count = isgucu_katsayisi_getir(chosen_m_name, g_req)
 
       cur_t = p_start
@@ -1946,7 +1945,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (TAM DSS VE OPTİMİZASYON MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (HIZLI BUTON VE SEGMENTED KONTROLLÜ)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -2043,29 +2042,59 @@ with st.sidebar:
   st.markdown("---")
   st.header("⚙️ 3. Gelişmiş DSS Modülleri")
   
-  with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=True):
+  with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
     sim_opt_mode = st.radio(
         "Algoritma Hedefi:", 
         ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
         help="Min-Geçiş: Aynı süt tiplerini arda arda dizer. Min-Makespan: En büyük tonajlıları önce üretir."
     )
       
-  with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=False):
-    sim_ariza_aktif = st.checkbox("Arıza Simülasyonunu Aç")
-    gun_secenekleri = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
-    sim_ariza_gun = st.selectbox("Arıza Günü", gun_secenekleri)
-    sim_ariza_makine = st.selectbox("Arızalanacak Makine", MAKINE_LISTESI)
+  with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=True):
+    sim_ariza_aktif = st.toggle("🚨 Arıza Simülasyonunu Devreye Al", value=False)
     
-    saat_dilimleri = []
-    for h in range(8, 24):
-      for m in [0, 15, 30, 45]:
-        saat_dilimleri.append(f"{h:02d}:{m:02d}")
-    for h in range(0, 4):
-      for m in [0, 15, 30, 45]:
-        saat_dilimleri.append(f"{h:02d}:{m:02d}")
+    if sim_ariza_aktif:
+      st.caption("📅 **Arıza Günü Seçimi:**")
+      gun_listesi = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
+      sim_ariza_gun = st.segmented_control("Gün", gun_listesi, default="Salı", label_visibility="collapsed")
+      if not sim_ariza_gun:
+        sim_ariza_gun = "Salı"
+      
+      st.caption("⚙️ **Arızalanacak Makine:**")
+      sim_ariza_makine = st.segmented_control("Makine", MAKINE_LISTESI, default="160 çap", label_visibility="collapsed")
+      if not sim_ariza_makine:
+        sim_ariza_makine = "160 çap"
 
-    sim_ariza_saat_str = st.selectbox("Arıza Başlangıç Saati (08:00 - 04:00)", saat_dilimleri, index=saat_dilimleri.index("14:00"))
-    sim_ariza_sure = st.slider("Arıza Süresi (Dakika)", min_value=15, max_value=240, value=60, step=15)
+      col_ar1, col_ar2 = st.columns(2)
+      with col_ar1:
+        saat_ondalik = st.slider(
+            "⏰ Başlangıç Saati",
+            min_value=8.0,
+            max_value=27.75,
+            value=14.5,
+            step=0.25,
+            help="08:00 ile gece 03:45 arası",
+        )
+        # Ondalık saati HH:MM formatına çevir
+        tam_h = int(saat_ondalik)
+        dakika = int(round((saat_ondalik - tam_h) * 60))
+        gosterim_h = tam_h if tam_h < 24 else (tam_h - 24)
+        sim_ariza_saat_str = f"{gosterim_h:02d}:{dakika:02d}"
+      
+      with col_ar2:
+        sim_ariza_sure = st.slider(
+            "⏱️ Süre (Dakika)",
+            min_value=15,
+            max_value=240,
+            value=60,
+            step=15
+        )
+
+      st.info(f"📍 **Senaryo:** {sim_ariza_gun} günü saat **{sim_ariza_saat_str}**'de **{sim_ariza_makine}** hattında **{sim_ariza_sure} dk** arıza uygulanacak.")
+    else:
+      sim_ariza_gun = "Pazartesi"
+      sim_ariza_makine = "160 çap"
+      sim_ariza_saat_str = "14:00"
+      sim_ariza_sure = 60
 
   st.button(
       "🔄 Parametreleri Varsayılana Sıfırla",
@@ -2192,7 +2221,6 @@ if st.session_state["results"] is not None:
   elif current_tab == "👥 İşgücü Analizi":
     st.subheader("İşgücü İhtiyacı Seviyelendirme Analizi")
     
-    # Görünüm Seçimi (Haftalık Ortalama vs Gün Bazlı)
     isgucu_secenekleri = ["📊 Haftalık Genel Ortalama"] + list(results["gunluk_saatlik_isgucu"].keys())
     secilen_isgucu_gorunumu = st.selectbox("İşgücü Görünümü Seçin:", isgucu_secenekleri)
     
@@ -2210,7 +2238,6 @@ if st.session_state["results"] is not None:
       gosterilecek_isgucu = [round(v, 1) for v in results["gunluk_saatlik_isgucu"][secilen_isgucu_gorunumu]]
       grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat)"
 
-    # Özet Kartlar
     peak_val = max(gosterilecek_isgucu) if gosterilecek_isgucu else 0.0
     avg_val = round(sum(gosterilecek_isgucu) / max(1, len(gosterilecek_isgucu)), 1)
     gunduz_avg = round(sum(gosterilecek_isgucu[:10]) / 10.0, 1) if len(gosterilecek_isgucu) >= 10 else 0.0
@@ -2222,7 +2249,6 @@ if st.session_state["results"] is not None:
     c_ig3.metric("Gündüz (08:00 - 18:00)", f"{gunduz_avg:.1f} Kişi")
     c_ig4.metric("Gece (18:00 - 04:00)", f"{gece_avg:.1f} Kişi")
 
-    # Çubuk Grafik Çizimi
     fig_dinamik_ig, ax_dig = plt.subplots(figsize=(11.5, 3.4), dpi=200)
     fig_dinamik_ig.patch.set_facecolor("#FFFFFF")
     bars_dig = ax_dig.bar(range(mesai_h), gosterilecek_isgucu, color="#2E6BA8", alpha=0.85, edgecolor="#1F4E78", width=0.65)
