@@ -2065,20 +2065,23 @@ with st.sidebar:
         sim_ariza_makine = "160 çap"
 
       col_ar1, col_ar2 = st.columns(2)
+      
+      # 08:00 - 03:45 saat listesi oluşturma
+      saat_secenekleri = []
+      for h in range(8, 24):
+        for m in [0, 15, 30, 45]:
+          saat_secenekleri.append(f"{h:02d}:{m:02d}")
+      for h in range(0, 4):
+        for m in [0, 15, 30, 45]:
+          saat_secenekleri.append(f"{h:02d}:{m:02d}")
+
       with col_ar1:
-        saat_ondalik = st.slider(
+        sim_ariza_saat_str = st.select_slider(
             "⏰ Başlangıç Saati",
-            min_value=8.0,
-            max_value=27.75,
-            value=14.5,
-            step=0.25,
-            help="08:00 ile gece 03:45 arası",
+            options=saat_secenekleri,
+            value="14:30",
+            help="Vardiya saatleri (08:00 - 03:45) arasından seçim yapın",
         )
-        # Ondalık saati HH:MM formatına çevir
-        tam_h = int(saat_ondalik)
-        dakika = int(round((saat_ondalik - tam_h) * 60))
-        gosterim_h = tam_h if tam_h < 24 else (tam_h - 24)
-        sim_ariza_saat_str = f"{gosterim_h:02d}:{dakika:02d}"
       
       with col_ar2:
         sim_ariza_sure = st.slider(
