@@ -802,10 +802,14 @@ def run_scheduler_pipeline(
           "rem_ton": s["tonaj_ton"],
       })
 
+    # DİNAMİK KOVA ÖNCELİKLENDİRMESİ: Özel kalıpları (2kg ve 5kg) öne al
     if "Geçiş" in opt_mode:
-      order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"]))
+      order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"] != "KOVA_10KG"))
     elif "Makespan" in opt_mode:
-      order_pool.sort(key=lambda x: x["rem_ton"], reverse=True)
+      order_pool.sort(key=lambda x: (x["makine_hedef"] == "KOVA_10KG", -x["rem_ton"]))
+    else:
+      # Standart JIT: Özel kova kalıplarını (2kg Büyük Kova, 5kg Küçük Kova) önceliklendir
+      order_pool.sort(key=lambda x: (x["makine_hedef"] == "KOVA_10KG", -x["rem_ton"]))
 
     schedule = []
 
@@ -839,6 +843,7 @@ def run_scheduler_pipeline(
       if not candidate_actions:
         break
 
+      # En erken boşa çıkan makineyi seç
       candidate_actions.sort(key=lambda x: x[1])
       chosen_m_name = candidate_actions[0][0]
       m_info = machines[chosen_m_name]
@@ -873,19 +878,24 @@ def run_scheduler_pipeline(
           <= max_kultur_bekleme
       ]
 
+      # DİNAMİK KOVA ATAMA STRATEJİSİ:
+      # Eğer makine Büyük Kova ise önce 2000g, Küçük Kova ise önce 5000g ara; yoksa 10kg ortak havuzdan al
       matching_orders = [
           o
           for o in order_pool
           if o["rem_ton"] > 0.01
-          and (
-              o["makine_hedef"] == chosen_m_name
-              or (
-                  o["makine_hedef"] == "KOVA_10KG"
-                  and chosen_m_name in ["Küçük Kova", "Büyük Kova"]
-              )
-          )
+          and o["makine_hedef"] == chosen_m_name
           and o["süt_tipi"] in ready_st_list
       ]
+      
+      if not matching_orders and chosen_m_name in ["Küçük Kova", "Büyük Kova"]:
+        matching_orders = [
+            o
+            for o in order_pool
+            if o["rem_ton"] > 0.01
+            and o["makine_hedef"] == "KOVA_10KG"
+            and o["süt_tipi"] in ready_st_list
+        ]
 
       if not matching_orders:
         matching_orders = [
@@ -1901,7 +1911,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (TAM DSS VE OPTİMİZASYON MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (HIZLI BUTON VE SEGMENTED KONTROLLÜ)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -2190,7 +2200,6 @@ if st.session_state["results"] is not None:
     st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
 
     with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
-      # 1. Kullanıcının O An Girdiği Aktif Senaryo
       res_curr = results
 
       # 2. Maksimum P6 Kapasite Önerisi (18.0 T/Sa)
@@ -2275,7 +2284,6 @@ if st.session_state["results"] is not None:
     df_comp = pd.DataFrame(comp_data)
     st.dataframe(df_comp, use_container_width=True)
 
-    # Dinamik Yatırım & ROI Açıklama Rozeti
     kurtarilan_p6_ton = max(0.0, res_curr['toplam_eksik_genel'] - res_max_p6['toplam_eksik_genel'])
     kurtarilan_p6_tl = kurtarilan_p6_ton * 1000.0 * sim_birim_fiyat
 
