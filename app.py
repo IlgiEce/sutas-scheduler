@@ -148,7 +148,6 @@ DEFAULT_FACTORY_DATA = {
 
 
 def default_excel_stream():
-  # Eğer yerel klasörde varsa oku
   for f_name in [
       "123123.xlsx",
       "haftalik_projeksiyon.xlsx",
@@ -158,7 +157,6 @@ def default_excel_stream():
       with open(f_name, "rb") as f:
         return io.BytesIO(f.read())
 
-  # Yoksa dahili hafızadaki tam sözlükten temiz bir Excel oluştur
   wb = openpyxl.Workbook()
   wb.remove(wb.active)
   for sheet_name, rows in DEFAULT_FACTORY_DATA.items():
@@ -1097,7 +1095,6 @@ def run_scheduler_pipeline(
     toplam_gerceklesen_genel += day_realized
     toplam_eksik_genel += day_unfulfilled
 
-    # Saf Süt Basma + 100T CIP + Hazırlık Payı (Efektif P6 Meşguliyeti)
     p6_day_pumping_hours = day_realized / p6_debi
     p6_cip_count = max(0, int(day_realized // p6_cip_limit))
     p6_cip_hours = p6_cip_count * p6_cip_suresi
@@ -1174,7 +1171,6 @@ def run_scheduler_pipeline(
   )
 
   # DİNAMİK VE BİREBİR SİMÜLASYON BAĞLANTILI 5 İSTASYON
-  # 1. Gece Hazırlığı: %92.5 baseline
   doygunluk_gece = min(
       100.0,
       round(
@@ -1186,10 +1182,8 @@ def run_scheduler_pipeline(
       ),
   )
 
-  # 2. P6 Pastörizatör: %89.6 baseline (Saf Pompa + 1 Sa CIP + 0.6 Sa Geçiş)
   doygunluk_p6 = round(genel_p6_doygunluk, 1)
 
-  # 3. Mayalama Tank Parkı: %74.0 baseline
   doygunluk_tanklar = min(
       100.0,
       round(
@@ -1201,7 +1195,6 @@ def run_scheduler_pipeline(
       ),
   )
 
-  # 4. Dolum Makineleri Parkı: %49.0 baseline
   doygunluk_makineler = min(
       100.0,
       round(
@@ -1214,7 +1207,6 @@ def run_scheduler_pipeline(
       ),
   )
 
-  # 5. CIP Yıkama Devreleri (Hat 1 & 2): Tonaj ve Çalışma Sıklığına Canlı Bağlı
   tonaj_carpan = ort_gerceklesen / 163.2
   doygunluk_cip = min(
       100.0,
@@ -1776,7 +1768,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (DEMO FABRİKA VERİSİ & WHAT-IF MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (DİNAMİK SEKME SABİTLEME & WHAT-IF)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -1792,6 +1784,9 @@ DEFAULT_PARAMS = {
 for k, v in DEFAULT_PARAMS.items():
   if k not in st.session_state:
     st.session_state[k] = v
+
+if "selected_tab" not in st.session_state:
+  st.session_state["selected_tab"] = "📊 Yönetici Özeti (KPI)"
 
 
 def varsayilana_sifirla():
@@ -1983,29 +1978,38 @@ if st.session_state["results"] is not None:
       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   )
 
-  # Sekmeli Dashboard Arayüzü
-  tab1, tab2, tab3, tab4 = st.tabs([
+  st.markdown("---")
+
+  # Sabit Sekme Seçici (State-Controlled Tab)
+  tab_options = [
       "📊 Yönetici Özeti (KPI)",
       "🔍 Tank & P6 Hazırlık Logu",
       "📈 Darboğaz & Kapasite Dolulukları",
       "📅 Günlük Çizelgeler",
-  ])
+  ]
+  current_tab = st.radio(
+      "Görünüm Seçin:",
+      tab_options,
+      horizontal=True,
+      key="selected_tab",
+      label_visibility="collapsed",
+  )
 
-  with tab1:
+  if current_tab == "📊 Yönetici Özeti (KPI)":
     st.subheader("Haftalık & Günlük KPI Tablosu")
     st.dataframe(results["df_kpi"], use_container_width=True)
     st.pyplot(results["fig_kpi"])
 
-  with tab2:
+  elif current_tab == "🔍 Tank & P6 Hazırlık Logu":
     st.subheader("Denetim Günlüğü (Audit Log)")
     st.dataframe(results["df_audit"], use_container_width=True)
 
-  with tab3:
+  elif current_tab == "📈 Darboğaz & Kapasite Dolulukları":
     st.subheader("Sistem Darboğazları & Kapasite Doluluk Oranları")
     st.pyplot(results["fig_db1"])
     st.pyplot(results["fig_hm"])
 
-  with tab4:
+  elif current_tab == "📅 Günlük Çizelgeler":
     st.subheader("Gün Bazlı Makine Çizelgeleri")
     gunler = list(results["gunluk_cizelgeler"].keys())
     selected_day = st.selectbox(
@@ -2016,6 +2020,7 @@ if st.session_state["results"] is not None:
       st.dataframe(
           results["gunluk_cizelgeler"][selected_day], use_container_width=True
       )
+
 elif active_excel_source is None:
   st.warning(
       "👈 Başlamak için lütfen sol menüden bir Excel (.xlsx) dosyası yükleyin."
