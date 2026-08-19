@@ -14,7 +14,7 @@ import streamlit as st
 
 # Sayfa Yapılandırması
 st.set_page_config(
-    page_title="Sütaş Karacabey Master Scheduler",
+    page_title="Sütaş Karacabey Master Scheduler & DSS",
     page_icon="🥛",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1674,7 +1674,7 @@ def run_scheduler_pipeline(
   img_db1.height = 320
   ws_db.add_image(img_db1, "A11")
 
-  # 📊 Figür 4: Heatmap (Fotoğraf 1 Tasarımı)
+  # 📊 Figür 4: Heatmap
   fig_hm, ax_hm = plt.subplots(figsize=(12, 3.8), dpi=200)
   fig_hm.patch.set_facecolor("#FFFFFF")
   hm_data = np.array([
@@ -1884,18 +1884,24 @@ def run_scheduler_pipeline(
       "fig_hm": fig_hm,
       "all_schedule_rows": all_schedule_rows,
       "gunluk_cizelgeler": gunluk_cizelgeler,
+      "gunluk_eksikler": gunluk_eksikler,
       "df_audit": df_audit,
       "genel_uyum": genel_uyum,
       "genel_p6_oee": genel_p6_doygunluk,
       "ort_gerceklesen": ort_gerceklesen,
+      "toplam_talep_genel": toplam_talep_genel,
+      "toplam_gerceklesen_genel": toplam_gerceklesen_genel,
+      "toplam_eksik_genel": toplam_eksik_genel,
       "gunluk_saatlik_isgucu": gunluk_saatlik_isgucu,
       "mesai_h": mesai_h,
       "gun_sayisi": gun_sayisi,
+      "p6_debi": p6_debi,
+      "kultur_suresi": kultur_suresi,
   }
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (HIZLI BUTON VE SEGMENTED KONTROLLÜ)
+# STREAMLIT KULLANICI ARAYÜZÜ (TAM DSS VE OPTİMİZASYON MİMARİSİ)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -1921,9 +1927,9 @@ def varsayilana_sifirla():
     st.session_state[key] = val
 
 
-st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Modülü")
+st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
 st.markdown(
-    "Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim ve çizelgeleme motoru."
+    "Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve finansal karar destek motoru."
 )
 
 with st.sidebar:
@@ -1987,6 +1993,16 @@ with st.sidebar:
     sim_makine_max_calisma = st.slider(
         "Maks. Ardışık Makine Çalışması (Saat)",
         min_value=4.0, max_value=12.0, step=0.5, key="makine_max_calisma",
+    )
+
+  with st.expander("💰 Finansal Parametreler", expanded=False):
+    sim_birim_fiyat = st.number_input(
+        "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
+        min_value=20.0,
+        max_value=200.0,
+        value=65.0,
+        step=5.0,
+        help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
     )
 
   st.markdown("---")
@@ -2117,14 +2133,16 @@ if active_excel_source is not None:
 if st.session_state["results"] is not None:
   results = st.session_state["results"]
 
+  # Finansal Kayıp Hesabı
+  toplam_eksik_ton = results["toplam_eksik_genel"]
+  tahmini_ciro_kaybi_tl = toplam_eksik_ton * 1000.0 * sim_birim_fiyat
+
   # Metrik Kartları
-  col1, col2, col3 = st.columns(3)
+  col1, col2, col3, col4 = st.columns(4)
   col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
-  col2.metric(
-      "P6 Efektif Hat Doygunluğu",
-      f"%{results['genel_p6_oee']:.1f}",
-  )
+  col2.metric("P6 Efektif Hat Doygunluğu", f"%{results['genel_p6_oee']:.1f}")
   col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
+  col4.metric("Karşılanamayan Sipariş Kaybı", f"{tahmini_ciro_kaybi_tl:,.0f} ₺", delta=f"-{toplam_eksik_ton:.1f} Ton", delta_color="inverse")
 
   # İndirme Butonu
   st.download_button(
@@ -2142,6 +2160,7 @@ if st.session_state["results"] is not None:
   # Sabit Sekme Seçici
   tab_options = [
       "📊 Yönetici Özeti",
+      "⚖️ Senaryo Kıyaslama (What-If)",
       "🔍 Denetim Logu",
       "📈 Darboğaz & Kapasite",
       "👥 İşgücü Analizi",
@@ -2157,9 +2176,111 @@ if st.session_state["results"] is not None:
   )
 
   if current_tab == "📊 Yönetici Özeti":
+    # 💰 FABRİKA MÜDÜRÜ İÇİN ÖZEL DARBOĞAZ & FİNANSAL ETKİ ALERTI
+    if toplam_eksik_ton > 0.05:
+      st.error(
+          f"🚨 **KRİTİK KAPASİTE UYARISI:** Bu hafta P6 pastörizatör ve tesis darboğazı nedeniyle **{toplam_eksik_ton:.1f} Ton** sipariş karşılanamadı / 04:00 mesai sınırına takıldı.\n\n"
+          f"💸 **Tahmini Haftalık Ciro Kaybı:** **{tahmini_ciro_kaybi_tl:,.0f} ₺** *(Birim Fiyat: {sim_birim_fiyat:.1f} ₺/kg üzerinden)*"
+      )
+    else:
+      st.success("✅ **MÜKEMMEL OPERASYONEL PERFORMANS:** Bu haftaki tüm siparişler 04:00 mesai penceresi dolmadan %100 oranında eksiksiz karşılandı. Darboğaz kaynaklı ciro kaybı: **0 ₺**")
+
     st.subheader("Haftalık & Günlük KPI Tablosu")
     st.dataframe(results["df_kpi"], use_container_width=True)
     st.pyplot(results["fig_kpi"])
+
+  elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)":
+    st.subheader("⚖️ Stratejik Senaryo Kıyaslama ve Yatırım Analizi")
+    st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
+
+    with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
+      # 1. Baseline Senaryosu (10 T/Sa, 1.5 Sa Kültür)
+      res_base = run_scheduler_pipeline(
+          excel_source=active_excel_source, p6_debi=10.0, kultur_suresi=1.5,
+          tank_cip_suresi=1.0, max_kultur_bekleme=6.0, makine_max_calisma=8.5,
+          p6_cip_limit=100.0, p6_cip_suresi=1.0, gunluk_mesai_saati=20.0
+      )
+      
+      # 2. P6 Yatırımı (14 T/Sa Debi)
+      res_p6 = run_scheduler_pipeline(
+          excel_source=active_excel_source, p6_debi=14.0, kultur_suresi=1.5,
+          tank_cip_suresi=1.0, max_kultur_bekleme=6.0, makine_max_calisma=8.5,
+          p6_cip_limit=100.0, p6_cip_suresi=1.0, gunluk_mesai_saati=20.0
+      )
+
+      # 3. Hızlı Mayalama (1.0 Sa Kültür)
+      res_cult = run_scheduler_pipeline(
+          excel_source=active_excel_source, p6_debi=10.0, kultur_suresi=1.0,
+          tank_cip_suresi=1.0, max_kultur_bekleme=6.0, makine_max_calisma=8.5,
+          p6_cip_limit=100.0, p6_cip_suresi=1.0, gunluk_mesai_saati=20.0
+      )
+
+      # 4. Aktif Kullanıcı Simülasyonu
+      res_curr = results
+
+    # Karşılaştırma Tablosu Oluşturma
+    comp_data = [
+        {
+            "Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)",
+            "1. Temel Durum (Mevcut)": f"{res_base['p6_debi']:.1f} T/Sa",
+            "2. P6 Yatırımı (14 T/Sa)": f"{res_p6['p6_debi']:.1f} T/Sa",
+            "3. Hızlı Mayalama (1.0 Sa)": f"{res_cult['p6_debi']:.1f} T/Sa",
+            "4. Senin Simülasyonun": f"{res_curr['p6_debi']:.1f} T/Sa",
+        },
+        {
+            "Performans Göstergesi": "Mayalama Süresi (Saat)",
+            "1. Temel Durum (Mevcut)": f"{res_base['kultur_suresi']:.2f} Sa",
+            "2. P6 Yatırımı (14 T/Sa)": f"{res_p6['kultur_suresi']:.2f} Sa",
+            "3. Hızlı Mayalama (1.0 Sa)": f"{res_cult['kultur_suresi']:.2f} Sa",
+            "4. Senin Simülasyonun": f"{res_curr['kultur_suresi']:.2f} Sa",
+        },
+        {
+            "Performans Göstergesi": "Haftalık Gerçekleşen Tonaj",
+            "1. Temel Durum (Mevcut)": f"{res_base['toplam_gerceklesen_genel']:.1f} Ton",
+            "2. P6 Yatırımı (14 T/Sa)": f"{res_p6['toplam_gerceklesen_genel']:.1f} Ton",
+            "3. Hızlı Mayalama (1.0 Sa)": f"{res_cult['toplam_gerceklesen_genel']:.1f} Ton",
+            "4. Senin Simülasyonun": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton",
+        },
+        {
+            "Performans Göstergesi": "Karşılanamayan / Eksik Kalan Tonaj",
+            "1. Temel Durum (Mevcut)": f"{res_base['toplam_eksik_genel']:.1f} Ton",
+            "2. P6 Yatırımı (14 T/Sa)": f"{res_p6['toplam_eksik_genel']:.1f} Ton",
+            "3. Hızlı Mayalama (1.0 Sa)": f"{res_cult['toplam_eksik_genel']:.1f} Ton",
+            "4. Senin Simülasyonun": f"{res_curr['toplam_eksik_genel']:.1f} Ton",
+        },
+        {
+            "Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)",
+            "1. Temel Durum (Mevcut)": f"%{res_base['genel_uyum']:.1f}",
+            "2. P6 Yatırımı (14 T/Sa)": f"%{res_p6['genel_uyum']:.1f}",
+            "3. Hızlı Mayalama (1.0 Sa)": f"%{res_cult['genel_uyum']:.1f}",
+            "4. Senin Simülasyonun": f"%{res_curr['genel_uyum']:.1f}",
+        },
+        {
+            "Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)",
+            "1. Temel Durum (Mevcut)": f"%{res_base['genel_p6_oee']:.1f}",
+            "2. P6 Yatırımı (14 T/Sa)": f"%{res_p6['genel_p6_oee']:.1f}",
+            "3. Hızlı Mayalama (1.0 Sa)": f"%{res_cult['genel_p6_oee']:.1f}",
+            "4. Senin Simülasyonun": f"%{res_curr['genel_p6_oee']:.1f}",
+        },
+        {
+            "Performans Göstergesi": "Darboğaz Ciro Kaybı (₺)",
+            "1. Temel Durum (Mevcut)": f"{(res_base['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺",
+            "2. P6 Yatırımı (14 T/Sa)": f"{(res_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺",
+            "3. Hızlı Mayalama (1.0 Sa)": f"{(res_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺",
+            "4. Senin Simülasyonun": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺",
+        },
+    ]
+
+    df_comp = pd.DataFrame(comp_data)
+    st.dataframe(df_comp, use_container_width=True)
+
+    # Yönetici Strateji Karar Kartı
+    kazanc_p6_tl = (res_base['toplam_eksik_genel'] - res_p6['toplam_eksik_genel']) * 1000.0 * sim_birim_fiyat
+    st.info(
+        f"💡 **Yatırım & Karar Destek Notu:**\n"
+        f"* P6 pastörizatör debisini 14 Ton/Saat seviyesine çıkaracak pompa yatırımı yapıldığında, haftalık **{(res_base['toplam_eksik_genel'] - res_p6['toplam_eksik_genel']):.1f} Ton** ek üretim kapasitesi açığa çıkar ve haftada **{kazanc_p6_tl:,.0f} ₺** ciro kaybı doğrudan kara dönüşür.\n"
+        f"* Mayalama süresini 1.0 saate indirecek hızlı kültür optimizasyonu ise tank parkı devir hızını hızlandırarak sabah vardiyasında hatları 30 dakika erken devreye alır."
+    )
 
   elif current_tab == "🔍 Denetim Logu":
     st.subheader("P6 ve Tank Geçişleri Denetim Günlüğü")
@@ -2240,14 +2361,12 @@ if st.session_state["results"] is not None:
       cg3.metric("Aktif Çalışan Hat Sayısı", f"{df_gantt_filtered['Makine'].nunique()} Hat")
       cg4.metric("Duruş / Arıza Durumu", f"{'1 Kesinti ⚠️' if g_ariza > 0 else 'Kesintisiz 🟢'}")
       
-      # 🚀 Ultra-Modern Executive Matplotlib Gantt Çizimi
       fig_gantt_dyn, ax_gd = plt.subplots(figsize=(14, 5.2), dpi=200)
       fig_gantt_dyn.patch.set_facecolor("#FAFAFC")
       ax_gd.set_facecolor("#FFFFFF")
       
       m_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
       
-      # Kulvar Arka Planları (Zebra Swimlanes)
       for i in range(len(MAKINE_LISTESI)):
         if i % 2 == 0:
           ax_gd.axhspan(i - 0.45, i + 0.45, color="#F4F6F9", zorder=0)
@@ -2273,7 +2392,6 @@ if st.session_state["results"] is not None:
           st_val = row["Süt Tipi"]
           col_info = palette.get(st_val, {"fill": "#595959", "edge": "#262626"})
           
-          # Yuvarlatılmış Şık Kart Blokları
           rect = patches.FancyBboxPatch(
               (s_num, y - 0.28), dur, 0.56,
               boxstyle="round,pad=0.01,rounding_size=0.03",
@@ -2298,7 +2416,6 @@ if st.session_state["results"] is not None:
       ax_gd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
       plt.setp(ax_gd.get_xticklabels(), rotation=0, fontsize=8.5, fontweight="bold", color="#333333")
 
-      # Vardiya Değişim Çizgisi (18:00)
       shift_time = g_start_min + datetime.timedelta(hours=10)
       ax_gd.axvline(mdates.date2num(shift_time), color="#C00000", linestyle="--", linewidth=1.5, zorder=2)
       
@@ -2306,7 +2423,6 @@ if st.session_state["results"] is not None:
       ax_gd.set_xlabel("Vardiya Saatleri (08:00 Başlangıçlı 20 Saatlik Üretim Penceresi)", fontsize=10, fontweight="bold", color="#1F4E78", labelpad=10)
       ax_gd.set_title(f"🏭 {secilen_gantt_gun} Günü Master Üretim & Çizelgeleme Gantt Şeması", fontsize=12, fontweight="bold", color="#1F4E78", pad=15)
 
-      # Üst Lejant (Legend)
       legend_elements = [
           patches.Patch(facecolor=v["fill"], edgecolor=v["edge"], label=k) for k, v in palette.items() if k != "DURUŞ"
       ]
