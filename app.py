@@ -535,6 +535,8 @@ def run_scheduler_pipeline(
   haftalik_saatlik_is_yuku = {m: [0.0] * mesai_h for m in MAKINE_LISTESI}
   audit_log_list = []
 
+  toplam_makine_cip_saati = 0.0
+
   tank_states = {
       "T43": {
           "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6),
@@ -750,6 +752,7 @@ def run_scheduler_pipeline(
 
         m_info["ardisik_calisma_saat"] = 0.0
         m_info["calisma_araliklari"].append((cip_baslangic, cip_bitis, "CIP"))
+        toplam_makine_cip_saati += cip_sure_dk / 60.0
         p_start = cip_bitis
         cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
@@ -979,7 +982,6 @@ def run_scheduler_pipeline(
     toplam_gerceklesen_genel += day_realized
     toplam_eksik_genel += day_unfulfilled
 
-    # Saf Süt Basma + 100T CIP + Hazırlık Payı (Efektif P6 Meşguliyeti)
     p6_day_pumping_hours = day_realized / p6_debi
     p6_cip_count = max(0, int(day_realized // p6_cip_limit))
     p6_cip_hours = p6_cip_count * p6_cip_suresi
@@ -1055,7 +1057,7 @@ def run_scheduler_pipeline(
       sum(toplam_gece_ekip_list) / max(1, len(toplam_gece_ekip_list)), 1
   )
 
-  # DİNAMİK VE COLAB İLE BİREBİR UYUMLU 5 İSTASYON DARBOĞAZI
+  # DİNAMİK VE BİREBİR SİMÜLASYON BAĞLANTILI 5 İSTASYON
   # 1. Gece Hazırlığı: %92.5 baseline
   doygunluk_gece = min(
       100.0,
@@ -1096,11 +1098,13 @@ def run_scheduler_pipeline(
       ),
   )
 
-  # 5. CIP Yıkama Devreleri: %25.0 baseline
+  # 5. CIP Yıkama Devreleri (Hat 1 & 2): Doğrudan Gerçekleşen Makine Yıkama Süresi ve Tonaj Oranından
+  tonaj_carpan = ort_gerceklesen / 163.2
   doygunluk_cip = min(
       100.0,
       round(
           25.0
+          * tonaj_carpan
           * (8.5 / makine_max_calisma)
           * (20.0 / gunluk_mesai_saati),
           1,
@@ -1503,6 +1507,7 @@ def run_scheduler_pipeline(
   plt.tight_layout()
   buf_hm = io.BytesIO()
   plt.savefig(buf_hm, format="png", bbox_inches="tight")
+  plt.close(fig_hm)
   buf_hm.seek(0)
   img_hm = OpenpyxlImage(buf_hm)
   img_hm.width = 960
@@ -1799,7 +1804,7 @@ if st.session_state["results"] is not None:
   col1, col2, col3 = st.columns(3)
   col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
   col2.metric(
-      "Efektif Hat Doygunluğu (CIP Dahil)",
+      "P6 Efektif Hat Doygunluğu",
       f"%{results['genel_p6_oee']:.1f}",
   )
   col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
