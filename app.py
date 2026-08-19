@@ -1338,7 +1338,7 @@ def run_scheduler_pipeline(
           ),
           "🟢 RAHAT / YEDEKLİ",
           (
-              "Kova ve fincan hatları esnek çalışır, gece yükünü 160 çap ve"
+              "Kova ve kase hatları esnek çalışır, gece yükünü 160 çap ve"
               " Grunwald taşır."
           ),
       ),
