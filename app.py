@@ -326,7 +326,6 @@ def sut_tipi_toplam_hiz_getir(sut_tipi, makineler):
 
 
 def dinamik_projeksiyon_oku(excel_source, sheet_name):
-    # header=None ile tüm satırlar korunarak 1. sıradaki siparişin kaybolması engellendi
     df = pd.read_excel(excel_source, sheet_name=sheet_name, header=None)
     header_row = 0
     for r_i in range(min(10, len(df))):
@@ -1348,6 +1347,7 @@ DEFAULT_PARAMS = {
     "mesai_saati": 20.0,
     "tank_cip_suresi": 1.0,
     "makine_max_calisma": 8.5,
+    "birim_fiyat": 65.0,
 }
 
 for k, v in DEFAULT_PARAMS.items():
@@ -1361,6 +1361,7 @@ if "selected_tab" not in st.session_state:
 def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
+    st.rerun()
 
 
 st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
@@ -1386,6 +1387,8 @@ with st.sidebar:
     st.markdown("---")
     st.header("🎛️ 2. Senaryo & Parametre Ayarları")
 
+    st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
+
     with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
         sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, step=0.5, key="p6_debi")
         sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, step=0.25, key="kultur_suresi")
@@ -1403,8 +1406,8 @@ with st.sidebar:
             "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
             min_value=20.0,
             max_value=200.0,
-            value=65.0,
             step=5.0,
+            key="birim_fiyat",
             help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
         )
 
@@ -1437,8 +1440,6 @@ with st.sidebar:
             st.info(f"📍 **Senaryo:** {sim_ariza_gun} günü saat **{sim_ariza_saat_str}**'de **{sim_ariza_makine}** hattında **{sim_ariza_sure} dk** arıza uygulanacak.")
         else:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
-
-    st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
 
 if "results" not in st.session_state:
     st.session_state["results"] = None
