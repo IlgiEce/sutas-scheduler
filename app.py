@@ -535,6 +535,10 @@ def run_scheduler_pipeline(
   haftalik_saatlik_is_yuku = {m: [0.0] * mesai_h for m in MAKINE_LISTESI}
   audit_log_list = []
 
+  # Canlı Darboğaz İzleme Değişkenleri
+  toplam_makine_calisma_saati = 0.0
+  toplam_makine_cip_saati = 0.0
+
   tank_states = {
       "T43": {
           "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6),
@@ -750,6 +754,7 @@ def run_scheduler_pipeline(
 
         m_info["ardisik_calisma_saat"] = 0.0
         m_info["calisma_araliklari"].append((cip_baslangic, cip_bitis, "CIP"))
+        toplam_makine_cip_saati += cip_sure_dk / 60.0
         p_start = cip_bitis
         cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
@@ -877,6 +882,7 @@ def run_scheduler_pipeline(
       machines[chosen_m_name]["calisma_araliklari"].append(
           (p_start, p_end, "URETIM")
       )
+      toplam_makine_calisma_saati += p_dur_h
 
       tank_states[best_t_name]["bosalma_saati"] = max(
           tank_states[best_t_name]["bosalma_saati"], p_end
@@ -1052,6 +1058,38 @@ def run_scheduler_pipeline(
   )
   ort_gece_ekip = round(
       sum(toplam_gece_ekip_list) / max(1, len(toplam_gece_ekip_list)), 1
+  )
+
+  # DİNAMİK DARBOĞAZ HESAPLAMALARI (TAM CANLI ENTEGRASYON)
+  # 1. Gece Hazırlığı: 4 tankın CIP + P6 dolum + kültür süresinin 4 saatlik gece penceresine oranı
+  gece_hazirlik_saati = (
+      (113.0 / p6_debi) + (4 * tank_cip_suresi) + kultur_suresi
+  )
+  doygunluk_gece = min(100.0, round((gece_hazirlik_saati / 4.0) * 100.0, 1))
+
+  # 2. Dolum Makineleri: Toplam makine çalışma süresinin 5 makinenin toplam mesai kapasitesine oranı
+  toplam_makine_kapasite_saat = 5.0 * gunluk_mesai_saati * gun_sayisi
+  doygunluk_makineler = min(
+      100.0,
+      round(
+          (toplam_makine_calisma_saati / max(1.0, toplam_makine_kapasite_saat))
+          * 100.0,
+          1,
+      ),
+  )
+
+  # 3. CIP Hatları: Gerçekleşen makine yıkama sürelerinin 2 CIP hattının toplam mesai süresine oranı
+  toplam_cip_hat_kapasitesi = 2.0 * gunluk_mesai_saati * gun_sayisi
+  doygunluk_cip_hatlari = min(
+      100.0,
+      max(
+          15.0,
+          round(
+              (toplam_makine_cip_saati / max(1.0, toplam_cip_hat_kapasitesi))
+              * 100.0,
+              1,
+          ),
+      ),
   )
 
   kpi_rows.append({
@@ -1323,7 +1361,7 @@ def run_scheduler_pipeline(
       (
           "Gece Hazırlığı (04:00 - 08:00)",
           "Sıfır Zayiat & CIP Süresi",
-          "92.5%",
+          f"%{doygunluk_gece}",
           "🟠 KRİTİK SÜREÇ RİSKİ",
           (
               "Sabah 08:00'de çoklu makineyi hazır başlatmak için gece CIP ve"
@@ -1333,9 +1371,7 @@ def run_scheduler_pipeline(
       (
           "Dolum Makineleri (5 Hat)",
           "Vardiya & İşgücü Kısıtı",
-          (
-              f"%{round((toplam_gerceklesen_genel / (340.0 * gun_sayisi)) * 100, 1)}"
-          ),
+          f"%{doygunluk_makineler}",
           "🟢 RAHAT / YEDEKLİ",
           (
               "Kova ve kase hatları esnek çalışır, gece yükünü 160 çap ve"
@@ -1345,7 +1381,7 @@ def run_scheduler_pipeline(
       (
           "CIP Hatları (Hat 1 / Hat 2)",
           "Eşzamanlı Yıkama Kuyruğu",
-          "%25.0",
+          f"%{doygunluk_cip_hatlari}",
           "🟡 İKİNCİL KISIT",
           (
               "Aynı CIP hattına bağlı makinelerin aynı anda yıkamaya girmesi"
@@ -1367,7 +1403,7 @@ def run_scheduler_pipeline(
   for col_letter, w_val in db_col_widths.items():
     ws_db.column_dimensions[col_letter].width = w_val
 
-  # 📊 Figür 3: Darboğaz Yatay Bar
+  # 📊 Figür 3: Darboğaz Yatay Bar (CANLI VERİLERLE)
   fig_db1, ax_db1 = plt.subplots(figsize=(10, 3.6), dpi=200)
   fig_db1.patch.set_facecolor("#FFFFFF")
   stations = [
@@ -1377,9 +1413,9 @@ def run_scheduler_pipeline(
       "P6 Pastörizatör",
   ]
   oee_v = [
-      25.0,
-      round((toplam_gerceklesen_genel / (340.0 * gun_sayisi)) * 100, 1),
-      92.5,
+      doygunluk_cip_hatlari,
+      doygunluk_makineler,
+      doygunluk_gece,
       round(genel_efektif_doygunluk, 1),
   ]
   colors_db = ["#FFC000", "#70AD47", "#ED7D31", "#C00000"]
@@ -1608,7 +1644,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (KASE GRUBU & WHAT-IF MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (TAM DİNAMİK DARBOĞAZ & WHAT-IF MİMARİSİ)
 # ==============================================================================
 st.title("🏭 Sütaş Karacabey Yoğurt Hattı Master Scheduler")
 st.markdown(
