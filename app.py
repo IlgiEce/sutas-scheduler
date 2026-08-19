@@ -1742,57 +1742,6 @@ def run_scheduler_pipeline(
   img_hm.height = 300
   ws_db.add_image(img_hm, "A26")
 
-  # 📊 Gantt Şeması Oluşturma
-  fig_gantt, ax_gantt = plt.subplots(figsize=(12, 4.2), dpi=200)
-  fig_gantt.patch.set_facecolor("#FFFFFF")
-  df_ganttRaw = pd.DataFrame(all_schedule_rows)
-  
-  if not df_ganttRaw.empty:
-    renk_haritasi = {
-        "TAM YAĞLI": "#1F4E78",
-        "YARIM YAĞLI": "#2E6BA8",
-        "%5 YAĞLI": "#8EAF9D",
-        "PAKSÜT": "#FFC000",
-        "DURUŞ": "#C00000",
-    }
-    m_idx_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
-    
-    gantt_hedef_gun = ariza_gun if (ariza_aktif and ariza_gun in [x["gun_adi"] for x in all_schedule_rows]) else "Pazartesi"
-    df_gunluk_gantt = df_ganttRaw[df_ganttRaw["gun_adi"].str.lower().str.strip() == gantt_hedef_gun.lower().strip()]
-
-    if not df_gunluk_gantt.empty:
-      g_start_min = df_gunluk_gantt["dt_start"].min()
-      g_end_max = g_start_min + datetime.timedelta(hours=gunluk_mesai_saati)
-
-      for _, row in df_gunluk_gantt.iterrows():
-        m_name = row["Makine"]
-        if m_name in m_idx_map:
-          y_pos = m_idx_map[m_name]
-          start_num = mdates.date2num(row["dt_start"])
-          end_num = mdates.date2num(row["dt_end"])
-          dur = end_num - start_num
-          c = renk_haritasi.get(row["Süt Tipi"], "#3A404A")
-          ax_gantt.barh(y_pos, dur, left=start_num, height=0.55, color=c, edgecolor="white")
-          
-          if (row["dt_end"] - row["dt_start"]).total_seconds() >= 2400:
-            mid_x = start_num + dur / 2
-            lbl = f"{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA"
-            ax_gantt.text(mid_x, y_pos, lbl, ha="center", va="center", color="white", fontsize=7.5, fontweight="bold")
-
-      ax_gantt.set_yticks(range(len(MAKINE_LISTESI)))
-      ax_gantt.set_yticklabels(MAKINE_LISTESI, fontsize=9, fontweight="bold")
-      ax_gantt.invert_yaxis()
-      ax_gantt.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-      ax_gantt.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
-      ax_gantt.set_title(f"{gantt_hedef_gun} Günü Üretim & Arıza Gantt Çizelgesi", fontsize=11, fontweight="bold", pad=12)
-      ax_gantt.set_xlabel("Vardiya Zaman Çizgisi (Saat)", fontsize=9, fontweight="bold")
-      ax_gantt.grid(axis="x", linestyle="--", alpha=0.5)
-
-      patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in renk_haritasi.values()]
-      ax_gantt.legend(patches, renk_haritasi.keys(), loc="upper right", fontsize=8, framealpha=0.8)
-  
-  plt.tight_layout()
-
   # 4. Günlük Çizelgeler
   header_fill = PatternFill(
       start_color="1F4E78", end_color="1F4E78", fill_type="solid"
@@ -1932,7 +1881,7 @@ def run_scheduler_pipeline(
       "fig_kpi": fig_kpi,
       "fig_db1": fig_db1,
       "fig_hm": fig_hm,
-      "fig_gantt": fig_gantt,
+      "all_schedule_rows": all_schedule_rows,
       "gunluk_cizelgeler": gunluk_cizelgeler,
       "df_audit": df_audit,
       "genel_uyum": genel_uyum,
@@ -2066,7 +2015,6 @@ with st.sidebar:
 
       col_ar1, col_ar2 = st.columns(2)
       
-      # 08:00 - 03:45 saat listesi oluşturma
       saat_secenekleri = []
       for h in range(8, 24):
         for m in [0, 15, 30, 45]:
@@ -2272,11 +2220,79 @@ if st.session_state["results"] is not None:
     st.pyplot(fig_dinamik_ig)
 
   elif current_tab == "📊 Gantt Şeması":
-    st.subheader("Üretim Zaman Çizelgesi (Gantt)")
-    if results["fig_gantt"] is not None:
-      st.pyplot(results["fig_gantt"])
+    st.subheader("Tesis İçi Günlük Üretim & Zaman Çizelgesi (Gantt)")
+    
+    df_gantt_all = pd.DataFrame(results["all_schedule_rows"])
+    if not df_gantt_all.empty:
+      gun_isimleri_gantt = list(dict.fromkeys(df_gantt_all["gun_adi"].tolist()))
+      secilen_gantt_gun = st.selectbox("Gantt Şemasını Görüntülemek İstediğiniz Günü Seçin:", gun_isimleri_gantt, key="gantt_day_sel")
+      
+      df_gantt_filtered = df_gantt_all[df_gantt_all["gun_adi"] == secilen_gantt_gun]
+      
+      # Günlük Özet Metrik Kartları
+      g_tonaj = df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum()
+      g_parti = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"])
+      g_ariza = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] == "DURUŞ"])
+      
+      cg1, cg2, cg3, cg4 = st.columns(4)
+      cg1.metric("Toplam Üretim", f"{g_tonaj:.1f} Ton")
+      cg2.metric("Toplam Üretim Partisi", f"{g_parti} Parti")
+      cg3.metric("Aktif Çalışan Hat", f"{df_gantt_filtered['Makine'].nunique()} Makine")
+      cg4.metric("Duruş / Arıza Durumu", f"{'1 Kesinti ⚠️' if g_ariza > 0 else 'Kesintisiz 🟢'}")
+      
+      # Matplotlib Gantt Çizimi
+      fig_gantt_dyn, ax_gd = plt.subplots(figsize=(12, 4.4), dpi=200)
+      fig_gantt_dyn.patch.set_facecolor("#FFFFFF")
+      
+      renk_haritasi = {
+          "TAM YAĞLI": "#1F4E78",
+          "YARIM YAĞLI": "#2E6BA8",
+          "%5 YAĞLI": "#8EAF9D",
+          "PAKSÜT": "#FFC000",
+          "DURUŞ": "#C00000",
+      }
+      m_idx_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
+      
+      g_start_min = df_gantt_filtered["dt_start"].min()
+      g_end_max = g_start_min + datetime.timedelta(hours=results["mesai_h"])
+
+      for _, row in df_gantt_filtered.iterrows():
+        m_name = row["Makine"]
+        if m_name in m_idx_map:
+          y_pos = m_idx_map[m_name]
+          start_num = mdates.date2num(row["dt_start"])
+          end_num = mdates.date2num(row["dt_end"])
+          dur = end_num - start_num
+          c = renk_haritasi.get(row["Süt Tipi"], "#3A404A")
+          ax_gd.barh(y_pos, dur, left=start_num, height=0.55, color=c, edgecolor="white", linewidth=1.2)
+          
+          if (row["dt_end"] - row["dt_start"]).total_seconds() >= 2400:
+            mid_x = start_num + dur / 2
+            lbl = f"{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA"
+            ax_gd.text(mid_x, y_pos, lbl, ha="center", va="center", color="white", fontsize=8, fontweight="bold")
+
+      ax_gd.set_yticks(range(len(MAKINE_LISTESI)))
+      ax_gd.set_yticklabels(MAKINE_LISTESI, fontsize=9.5, fontweight="bold")
+      ax_gd.invert_yaxis()
+      ax_gd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+      ax_gd.xaxis.set_major_locator(mdates.HourLocator(interval=2))
+      ax_gd.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
+      ax_gd.set_title(f"🏭 {secilen_gantt_gun} Günü Master Üretim Gantt Şeması", fontsize=11, fontweight="bold", pad=14)
+      ax_gd.set_xlabel("Vardiya Zaman Çizgisi (Saat)", fontsize=10, fontweight="bold", labelpad=8)
+      ax_gd.grid(axis="x", linestyle="--", alpha=0.5)
+
+      patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in renk_haritasi.values()]
+      ax_gd.legend(patches, renk_haritasi.keys(), loc="upper right", fontsize=8, framealpha=0.9)
+      
+      plt.tight_layout()
+      st.pyplot(fig_gantt_dyn)
+      
+      # Gantt Detay Tablosu
+      with st.expander(f"📋 {secilen_gantt_gun} Günü Zaman Çizelgesi Akış Tablosu", expanded=False):
+        gantt_table_df = df_gantt_filtered[["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Makine", "Tahsis Tank", "Başlangıç", "Bitiş"]].copy()
+        st.dataframe(gantt_table_df, use_container_width=True)
     else:
-      st.info("Gösterilecek çizelgeleme verisi bulunamadı.")
+      st.info("Gantt şeması oluşturmak için lütfen sol menüden simülasyonu çalıştırın.")
 
   elif current_tab == "📅 Günlük Çizelgeler":
     st.subheader("Gün Bazlı Makine Çizelgeleri")
