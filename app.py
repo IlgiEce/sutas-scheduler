@@ -209,6 +209,23 @@ def hiz_matrisini_yukle():
 MAKINE_HIZLARI = hiz_matrisini_yukle()
 
 
+def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
+  """Kullanıcı tarafından belirlenen kesin işgücü kişi sayıları."""
+  if makine_adi == "160 çap":
+    return 4.0
+  elif makine_adi == "132 çap":
+    return 5.0
+  elif makine_adi == "Grunwald":
+    if "95" in str(gramaj_adi):
+      return 5.0
+    return 3.0  # 75 çap için 3 kişi
+  elif makine_adi == "Küçük Kova":
+    return 5.0
+  elif makine_adi == "Büyük Kova":
+    return 6.0
+  return 4.0
+
+
 def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
   u = str(urun_adi).upper()
   st_col = str(sut_tipi_col).upper()
@@ -641,9 +658,10 @@ def run_scheduler_pipeline(
     gunluk_mesai_saati=20.0,
     opt_mode="Sezgisel JIT (Mevcut)",
     ariza_aktif=False,
+    ariza_gun="Pazartesi",
     ariza_makine="160 çap",
-    ariza_saat=14.0,
-    ariza_sure=90,
+    ariza_saat_str="14:00",
+    ariza_sure=60,
 ):
   xls = pd.ExcelFile(excel_source)
   baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
@@ -654,7 +672,7 @@ def run_scheduler_pipeline(
   gunluk_makine_istatistikleri = {m: 0.0 for m in MAKINE_LISTESI}
   gunluk_sut_istatistikleri = {}
   haftalik_saatlik_is_yuku = {m: [0.0] * mesai_h for m in MAKINE_LISTESI}
-  haftalik_saatlik_operator = [0.0] * mesai_h
+  haftalik_saatlik_isgucu = [0.0] * mesai_h
 
   audit_log_list = []
   all_schedule_rows = []
@@ -748,16 +766,25 @@ def run_scheduler_pipeline(
         for m in MAKINE_LISTESI
     }
 
-    # ARIZA SİMÜLASYONU ENJEKSİYONU
+    # ARIZA HESAPLAMASI (GÜN VE SAAT DİNAMİK)
+    is_ariza_gunu = ariza_aktif and (sheet_name.lower().strip() == ariza_gun.lower().strip())
     b_start = None
     b_end = None
-    if ariza_aktif and day_idx == 1:
-      delta_h = ariza_saat - 8.0
-      b_start = gun_baslangic + datetime.timedelta(hours=delta_h)
-      b_end = b_start + datetime.timedelta(minutes=ariza_sure)
-      machines[ariza_makine]["calisma_araliklari"].append(
-          (b_start, b_end, "ARIZA ⚠️")
-      )
+    if is_ariza_gunu:
+      try:
+        h_part, m_part = [int(x) for x in ariza_saat_str.split(":")]
+        # 08:00 başlangıcına göre ofset
+        if h_part >= 8:
+          offset_hours = (h_part - 8) + (m_part / 60.0)
+        else:
+          offset_hours = (h_part + 16) + (m_part / 60.0)
+        b_start = gun_baslangic + datetime.timedelta(hours=offset_hours)
+        b_end = b_start + datetime.timedelta(minutes=ariza_sure)
+        machines[ariza_makine]["calisma_araliklari"].append(
+            (b_start, b_end, "ARIZA ⚠️")
+        )
+      except Exception:
+        is_ariza_gunu = False
 
     cip_hatlari_musaitlik = {"HAT_1": gun_baslangic, "HAT_2": gun_baslangic}
     tank_cip_musaitlik = gun_baslangic - datetime.timedelta(hours=6)
@@ -775,7 +802,6 @@ def run_scheduler_pipeline(
           "rem_ton": s["tonaj_ton"],
       })
 
-    # OPTİMİZASYON ALGORİTMASI SEÇİMİ
     if "Geçiş" in opt_mode:
       order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"]))
     elif "Makespan" in opt_mode:
@@ -786,7 +812,7 @@ def run_scheduler_pipeline(
     while any(o["rem_ton"] > 0.01 for o in order_pool):
       candidate_actions = []
       for m_name in MAKINE_LISTESI:
-        if ariza_aktif and day_idx == 1 and m_name == ariza_makine:
+        if is_ariza_gunu and m_name == ariza_makine:
           if b_start <= machines[m_name]["musait_zamani"] < b_end:
             machines[m_name]["musait_zamani"] = b_end
 
@@ -1001,7 +1027,8 @@ def run_scheduler_pipeline(
       p_dur_h = chunk_ton / hiz
       p_end = p_start + datetime.timedelta(hours=p_dur_h)
 
-      if ariza_aktif and day_idx == 1 and chosen_m_name == ariza_makine:
+      # ARIZA KESİNTİSİ
+      if is_ariza_gunu and chosen_m_name == ariza_makine:
         if p_start < b_start and p_end > b_start:
           p_end = b_start
           p_dur_h = (p_end - p_start).total_seconds() / 3600.0
@@ -1067,9 +1094,13 @@ def run_scheduler_pipeline(
           "Kültür & CIP Hijyen Notu": hijyen_notu,
           "dt_start": p_start,
           "dt_end": p_end,
+          "gun_adi": sheet_name,
       }
       schedule.append(satir_verisi)
       all_schedule_rows.append(satir_verisi)
+
+      # İŞGÜCÜ HESAPLAMASI (REÇETE & MAKİNE BAZLI KESİN KATSAYILAR)
+      op_count = isgucu_katsayisi_getir(chosen_m_name, g_req)
 
       cur_t = p_start
       while cur_t < p_end:
@@ -1084,18 +1115,15 @@ def run_scheduler_pipeline(
           haftalik_saatlik_is_yuku[chosen_m_name][h_idx] += round(
               work_in_this_hour * hiz, 2
           )
-
-          op_count = 3 if chosen_m_name in ["Küçük Kova", "Büyük Kova"] else 2
-          haftalik_saatlik_operator[h_idx] += op_count * work_in_this_hour
-
+          haftalik_saatlik_isgucu[h_idx] += op_count * work_in_this_hour
           cur_t = min(p_end, next_hour)
         else:
           break
 
-    if ariza_aktif and day_idx == 1:
+    if is_ariza_gunu:
       bakim_satiri = {
           "Sipariş ID": "ARIZA-01",
-          "Ürün Adı": "BAKIM / ARIZA DURUŞU",
+          "Ürün Adı": "⚠️ BAKIM / ARIZA DURUŞU",
           "Süt Tipi": "DURUŞ",
           "Miktar (Ton)": 0,
           "Tahsis Tank": "-",
@@ -1105,9 +1133,10 @@ def run_scheduler_pipeline(
           "Başlangıç": b_start.strftime("%d-%m-%Y %H:%M"),
           "Bitiş": b_end.strftime("%d-%m-%Y %H:%M"),
           "04:00 Hedefi": "-",
-          "Kültür & CIP Hijyen Notu": "⚠️ Planlı/Plansız Kesinti",
+          "Kültür & CIP Hijyen Notu": "⚠️ Planlı/Plansız Hat Kesintisi",
           "dt_start": b_start,
           "dt_end": b_end,
+          "gun_adi": sheet_name,
       }
       schedule.append(bakim_satiri)
       all_schedule_rows.append(bakim_satiri)
@@ -1715,22 +1744,25 @@ def run_scheduler_pipeline(
   img_hm.height = 300
   ws_db.add_image(img_hm, "A26")
 
-  # 📊 Figür 5: Operatör ve İşgücü Çubuğu
-  fig_op, ax_op = plt.subplots(figsize=(11.5, 3.0), dpi=200)
+  # 📊 Figür 5: Saatlik İşgücü İhtiyacı Çubuğu (Kişi / Saat)
+  fig_op, ax_op = plt.subplots(figsize=(11.5, 3.4), dpi=200)
   fig_op.patch.set_facecolor("#FFFFFF")
-  op_avg = [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_operator]
-  bars_op = ax_op.bar(range(mesai_h), op_avg, color="#2E6BA8", alpha=0.8, edgecolor="#1F4E78")
+  op_avg = [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_isgucu]
+  bars_op = ax_op.bar(range(mesai_h), op_avg, color="#2E6BA8", alpha=0.85, edgecolor="#1F4E78", width=0.65)
   ax_op.set_xticks(range(mesai_h))
-  ax_op.set_xticklabels(saatler, rotation=45, ha="right", fontsize=8)
-  ax_op.set_title("Saatlik Ortalama Operatör & İşgücü İhtiyacı (FTE - Tam Zamanlı Eşdeğer)", fontsize=11, fontweight="bold", pad=12)
-  ax_op.set_ylabel("Aktif Operatör Sayısı", fontsize=9, fontweight="bold")
+  ax_op.set_xticklabels(saatler, rotation=45, ha="right", fontsize=9, fontweight="bold")
+  ax_op.set_title("Saatlik Ortalama İşgücü İhtiyacı (Kişi / Saat)", fontsize=11, fontweight="bold", pad=14)
+  ax_op.set_ylabel("Gereken İşgücü (Kişi)", fontsize=10, fontweight="bold")
+  ax_op.set_xlabel("Günün Saatleri (08:00 - 04:00 Mesai Penceresi)", fontsize=10, fontweight="bold", labelpad=8)
   ax_op.grid(axis="y", linestyle="--", alpha=0.5)
 
   for bar in bars_op:
     h = bar.get_height()
     if h > 0.0:
-      ax_op.text(bar.get_x() + bar.get_width()/2, h + 0.2, f"{h:.1f}", ha='center', va='bottom', fontsize=8, fontweight='bold')
+      ax_op.text(bar.get_x() + bar.get_width()/2, h + 0.3, f"{h:.1f}", ha='center', va='bottom', fontsize=8.5, fontweight='bold')
 
+  max_isgucu = max(op_avg) if op_avg else 10.0
+  ax_op.set_ylim(0, max_isgucu * 1.25)
   plt.tight_layout()
 
   # 📊 Gantt Şeması Oluşturma (Matplotlib ile %100 Uyumlu)
@@ -1748,39 +1780,40 @@ def run_scheduler_pipeline(
     }
     m_idx_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
     
-    # 1. Günün Gantt akışını çizdir
-    pzt_start = baslangic_gunu
-    pzt_end = baslangic_gunu + datetime.timedelta(hours=gunluk_mesai_saati)
-    df_pzt = df_ganttRaw[(df_ganttRaw["dt_start"] >= pzt_start) & (df_ganttRaw["dt_start"] < pzt_end)]
+    # Arızanın olduğu günün Gantt akışını çizdir
+    gantt_hedef_gun = ariza_gun if (ariza_aktif and ariza_gun in [x["gun_adi"] for x in all_schedule_rows]) else "Pazartesi"
+    df_gunluk_gantt = df_ganttRaw[df_ganttRaw["gun_adi"].str.lower().str.strip() == gantt_hedef_gun.lower().strip()]
 
-    for _, row in df_pzt.iterrows():
-      m_name = row["Makine"]
-      if m_name in m_idx_map:
-        y_pos = m_idx_map[m_name]
-        start_num = mdates.date2num(row["dt_start"])
-        end_num = mdates.date2num(row["dt_end"])
-        dur = end_num - start_num
-        c = renk_haritasi.get(row["Süt Tipi"], "#3A404A")
-        ax_gantt.barh(y_pos, dur, left=start_num, height=0.55, color=c, edgecolor="white")
-        
-        # Kutu içi etiket
-        if (row["dt_end"] - row["dt_start"]).total_seconds() >= 3600:
-          mid_x = start_num + dur / 2
-          lbl = f"{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA"
-          ax_gantt.text(mid_x, y_pos, lbl, ha="center", va="center", color="white", fontsize=7.5, fontweight="bold")
+    if not df_gunluk_gantt.empty:
+      g_start_min = df_gunluk_gantt["dt_start"].min()
+      g_end_max = g_start_min + datetime.timedelta(hours=gunluk_mesai_saati)
 
-    ax_gantt.set_yticks(range(len(MAKINE_LISTESI)))
-    ax_gantt.set_yticklabels(MAKINE_LISTESI, fontsize=9, fontweight="bold")
-    ax_gantt.invert_yaxis()
-    ax_gantt.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-    ax_gantt.set_xlim(mdates.date2num(pzt_start), mdates.date2num(pzt_end))
-    ax_gantt.set_title("Günlük Üretim & Arıza Gantt Çizelgesi (Günün Saatleri)", fontsize=11, fontweight="bold", pad=12)
-    ax_gantt.set_xlabel("Vardiya Zaman Çizgisi (Saat)", fontsize=9, fontweight="bold")
-    ax_gantt.grid(axis="x", linestyle="--", alpha=0.5)
+      for _, row in df_gunluk_gantt.iterrows():
+        m_name = row["Makine"]
+        if m_name in m_idx_map:
+          y_pos = m_idx_map[m_name]
+          start_num = mdates.date2num(row["dt_start"])
+          end_num = mdates.date2num(row["dt_end"])
+          dur = end_num - start_num
+          c = renk_haritasi.get(row["Süt Tipi"], "#3A404A")
+          ax_gantt.barh(y_pos, dur, left=start_num, height=0.55, color=c, edgecolor="white")
+          
+          if (row["dt_end"] - row["dt_start"]).total_seconds() >= 2400:
+            mid_x = start_num + dur / 2
+            lbl = f"{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA"
+            ax_gantt.text(mid_x, y_pos, lbl, ha="center", va="center", color="white", fontsize=7.5, fontweight="bold")
 
-    # Özel Legend
-    patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in renk_haritasi.values()]
-    ax_gantt.legend(patches, renk_haritasi.keys(), loc="upper right", fontsize=8, framealpha=0.8)
+      ax_gantt.set_yticks(range(len(MAKINE_LISTESI)))
+      ax_gantt.set_yticklabels(MAKINE_LISTESI, fontsize=9, fontweight="bold")
+      ax_gantt.invert_yaxis()
+      ax_gantt.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+      ax_gantt.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
+      ax_gantt.set_title(f"{gantt_hedef_gun} Günü Üretim & Arıza Gantt Çizelgesi", fontsize=11, fontweight="bold", pad=12)
+      ax_gantt.set_xlabel("Vardiya Zaman Çizgisi (Saat)", fontsize=9, fontweight="bold")
+      ax_gantt.grid(axis="x", linestyle="--", alpha=0.5)
+
+      patches = [plt.Rectangle((0, 0), 1, 1, color=color) for color in renk_haritasi.values()]
+      ax_gantt.legend(patches, renk_haritasi.keys(), loc="upper right", fontsize=8, framealpha=0.8)
   
   plt.tight_layout()
 
@@ -1820,7 +1853,7 @@ def run_scheduler_pipeline(
     ws_d = wb.create_sheet(title=sheet_title)
     ws_d.views.sheetView[0].showGridLines = True
     display_cols = (
-        [c for c in df_detail.columns if c not in ["dt_start", "dt_end"]]
+        [c for c in df_detail.columns if c not in ["dt_start", "dt_end", "gun_adi"]]
         if not df_detail.empty
         else [
             "Sipariş ID",
@@ -2040,16 +2073,60 @@ with st.sidebar:
     )
       
   with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=False):
-    sim_ariza_aktif = st.checkbox("Arıza Simülasyonunu Aç (Pazartesi)")
+    sim_ariza_aktif = st.checkbox("Arıza Simülasyonunu Aç")
+    gun_secenekleri = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
+    sim_ariza_gun = st.selectbox("Arıza Günü", gun_secenekleri)
     sim_ariza_makine = st.selectbox("Arızalanacak Makine", MAKINE_LISTESI)
-    sim_ariza_saat = st.slider("Arıza Başlangıç Saati", min_value=8.0, max_value=23.0, value=14.0, step=0.5)
-    sim_ariza_sure = st.slider("Arıza Süresi (Dakika)", min_value=30, max_value=240, value=90, step=15)
+    
+    # 08:00 - 03:45 saat dilimi listesi
+    saat_dilimleri = []
+    for h in range(8, 24):
+      for m in [0, 15, 30, 45]:
+        saat_dilimleri.append(f"{h:02d}:{m:02d}")
+    for h in range(0, 4):
+      for m in [0, 15, 30, 45]:
+        saat_dilimleri.append(f"{h:02d}:{m:02d}")
+
+    sim_ariza_saat_str = st.selectbox("Arıza Başlangıç Saati (08:00 - 04:00)", saat_dilimleri, index=saat_dilimleri.index("14:00"))
+    sim_ariza_sure = st.slider("Arıza Süresi (Dakika)", min_value=15, max_value=240, value=60, step=15)
 
   st.button(
       "🔄 Parametreleri Varsayılana Sıfırla",
       on_click=varsayilana_sifirla,
       use_container_width=True,
   )
+
+  st.markdown("---")
+  st.header("🔒 4. Sabit Tesis & Fiziksel Kısıtlar")
+
+  with st.expander("🛢️ Mayalama Tank Kapasiteleri", expanded=False):
+    st.markdown("""
+        * **T43:** 38.0 Ton
+        * **T40:** 25.0 Ton
+        * **T41:** 25.0 Ton
+        * **T42:** 25.0 Ton
+        * **Toplam Tesis Mayalama Kapasitesi:** 113.0 Ton
+        * *Kural:* Asgari parti dolum kuralı uygulanır (min. 25T parti).
+        """)
+
+  with st.expander("🧼 Makine CIP Hatları & Yıkama", expanded=False):
+    st.markdown("""
+        * **HAT_1 (Kase Grubu):** 
+          - 160 çap: 60 dk
+          - 132 çap: 60 dk
+          - Grunwald: 110 dk
+        * **HAT_2 (Kova Grubu):** 
+          - Küçük Kova: 60 dk
+          - Büyük Kova: 60 dk
+        * *Kural:* Aynı hatta bağlı makineler aynı anda CIP'e giremez (kuyruk yönetimi).
+        """)
+
+  with st.expander("👥 Hat & Ekipman Kısıtları", expanded=False):
+    st.markdown("""
+        * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
+        * **Önceliklendirme:** JIT (Just-In-Time) mayalama zinciri
+        * **Hijyen Standardı:** Süt tipi geçişlerinde CIP doğrulaması
+        """)
 
 # Oturum Durumu Kontrolü
 if "results" not in st.session_state:
@@ -2072,8 +2149,9 @@ if active_excel_source is not None:
           gunluk_mesai_saati=sim_mesai_saati,
           opt_mode=sim_opt_mode,
           ariza_aktif=sim_ariza_aktif,
+          ariza_gun=sim_ariza_gun,
           ariza_makine=sim_ariza_makine,
-          ariza_saat=sim_ariza_saat,
+          ariza_saat_str=sim_ariza_saat_str,
           ariza_sure=sim_ariza_sure
       )
     st.success("✅ Senaryo optimizasyonu başarıyla tamamlandı!")
@@ -2135,7 +2213,7 @@ if st.session_state["results"] is not None:
     st.pyplot(results["fig_hm"])
     
   elif current_tab == "👥 İşgücü Analizi":
-    st.subheader("Operatör & İşgücü Seviyelendirme Analizi")
+    st.subheader("Saatlik İşgücü İhtiyacı Analizi")
     st.pyplot(results["fig_op"])
 
   elif current_tab == "📊 Gantt Şeması":
@@ -2154,7 +2232,7 @@ if st.session_state["results"] is not None:
 
     if selected_day:
       df_to_show = results["gunluk_cizelgeler"][selected_day]
-      display_df = df_to_show.drop(columns=["dt_start", "dt_end"], errors="ignore")
+      display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi"], errors="ignore")
       st.dataframe(display_df, use_container_width=True)
 
 elif active_excel_source is None:
