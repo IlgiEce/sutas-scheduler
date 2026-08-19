@@ -210,7 +210,6 @@ MAKINE_HIZLARI = hiz_matrisini_yukle()
 
 
 def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
-  """Kullanıcı tarafından belirlenen kesin işgücü kişi sayıları."""
   if makine_adi == "160 çap":
     return 4.0
   elif makine_adi == "132 çap":
@@ -218,7 +217,7 @@ def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
   elif makine_adi == "Grunwald":
     if "95" in str(gramaj_adi):
       return 5.0
-    return 3.0  # 75 çap için 3 kişi
+    return 3.0
   elif makine_adi == "Küçük Kova":
     return 5.0
   elif makine_adi == "Büyük Kova":
@@ -672,7 +671,7 @@ def run_scheduler_pipeline(
   gunluk_makine_istatistikleri = {m: 0.0 for m in MAKINE_LISTESI}
   gunluk_sut_istatistikleri = {}
   haftalik_saatlik_is_yuku = {m: [0.0] * mesai_h for m in MAKINE_LISTESI}
-  haftalik_saatlik_isgucu = [0.0] * mesai_h
+  gunluk_saatlik_isgucu = {}
 
   audit_log_list = []
   all_schedule_rows = []
@@ -711,6 +710,7 @@ def run_scheduler_pipeline(
   for day_idx, sheet_name in enumerate(xls.sheet_names, 1):
     gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
     cutoff_0400 = gun_baslangic + datetime.timedelta(hours=gunluk_mesai_saati)
+    gunluk_saatlik_isgucu[sheet_name] = [0.0] * mesai_h
 
     siparisler = dinamik_projeksiyon_oku(excel_source, sheet_name)
     if not siparisler:
@@ -773,7 +773,6 @@ def run_scheduler_pipeline(
     if is_ariza_gunu:
       try:
         h_part, m_part = [int(x) for x in ariza_saat_str.split(":")]
-        # 08:00 başlangıcına göre ofset
         if h_part >= 8:
           offset_hours = (h_part - 8) + (m_part / 60.0)
         else:
@@ -1115,7 +1114,7 @@ def run_scheduler_pipeline(
           haftalik_saatlik_is_yuku[chosen_m_name][h_idx] += round(
               work_in_this_hour * hiz, 2
           )
-          haftalik_saatlik_isgucu[h_idx] += op_count * work_in_this_hour
+          gunluk_saatlik_isgucu[sheet_name][h_idx] += op_count * work_in_this_hour
           cur_t = min(p_end, next_hour)
         else:
           break
@@ -1744,28 +1743,7 @@ def run_scheduler_pipeline(
   img_hm.height = 300
   ws_db.add_image(img_hm, "A26")
 
-  # 📊 Figür 5: Saatlik İşgücü İhtiyacı Çubuğu (Kişi / Saat)
-  fig_op, ax_op = plt.subplots(figsize=(11.5, 3.4), dpi=200)
-  fig_op.patch.set_facecolor("#FFFFFF")
-  op_avg = [round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_isgucu]
-  bars_op = ax_op.bar(range(mesai_h), op_avg, color="#2E6BA8", alpha=0.85, edgecolor="#1F4E78", width=0.65)
-  ax_op.set_xticks(range(mesai_h))
-  ax_op.set_xticklabels(saatler, rotation=45, ha="right", fontsize=9, fontweight="bold")
-  ax_op.set_title("Saatlik Ortalama İşgücü İhtiyacı (Kişi / Saat)", fontsize=11, fontweight="bold", pad=14)
-  ax_op.set_ylabel("Gereken İşgücü (Kişi)", fontsize=10, fontweight="bold")
-  ax_op.set_xlabel("Günün Saatleri (08:00 - 04:00 Mesai Penceresi)", fontsize=10, fontweight="bold", labelpad=8)
-  ax_op.grid(axis="y", linestyle="--", alpha=0.5)
-
-  for bar in bars_op:
-    h = bar.get_height()
-    if h > 0.0:
-      ax_op.text(bar.get_x() + bar.get_width()/2, h + 0.3, f"{h:.1f}", ha='center', va='bottom', fontsize=8.5, fontweight='bold')
-
-  max_isgucu = max(op_avg) if op_avg else 10.0
-  ax_op.set_ylim(0, max_isgucu * 1.25)
-  plt.tight_layout()
-
-  # 📊 Gantt Şeması Oluşturma (Matplotlib ile %100 Uyumlu)
+  # 📊 Gantt Şeması Oluşturma
   fig_gantt, ax_gantt = plt.subplots(figsize=(12, 4.2), dpi=200)
   fig_gantt.patch.set_facecolor("#FFFFFF")
   df_ganttRaw = pd.DataFrame(all_schedule_rows)
@@ -1780,7 +1758,6 @@ def run_scheduler_pipeline(
     }
     m_idx_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
     
-    # Arızanın olduğu günün Gantt akışını çizdir
     gantt_hedef_gun = ariza_gun if (ariza_aktif and ariza_gun in [x["gun_adi"] for x in all_schedule_rows]) else "Pazartesi"
     df_gunluk_gantt = df_ganttRaw[df_ganttRaw["gun_adi"].str.lower().str.strip() == gantt_hedef_gun.lower().strip()]
 
@@ -1817,7 +1794,7 @@ def run_scheduler_pipeline(
   
   plt.tight_layout()
 
-  # 4. Günlük Çizelgeler (Excel Çıktısı Formatlamaları)
+  # 4. Günlük Çizelgeler
   header_fill = PatternFill(
       start_color="1F4E78", end_color="1F4E78", fill_type="solid"
   )
@@ -1946,7 +1923,6 @@ def run_scheduler_pipeline(
     for col_letter, width_val in sabit_genislikler.items():
       ws_d.column_dimensions[col_letter].width = width_val
 
-  # Bellek akışına yaz
   excel_buffer = io.BytesIO()
   wb.save(excel_buffer)
   excel_buffer.seek(0)
@@ -1957,13 +1933,15 @@ def run_scheduler_pipeline(
       "fig_kpi": fig_kpi,
       "fig_db1": fig_db1,
       "fig_hm": fig_hm,
-      "fig_op": fig_op,
       "fig_gantt": fig_gantt,
       "gunluk_cizelgeler": gunluk_cizelgeler,
       "df_audit": df_audit,
       "genel_uyum": genel_uyum,
       "genel_p6_oee": genel_p6_doygunluk,
       "ort_gerceklesen": ort_gerceklesen,
+      "gunluk_saatlik_isgucu": gunluk_saatlik_isgucu,
+      "mesai_h": mesai_h,
+      "gun_sayisi": gun_sayisi,
   }
 
 
@@ -2078,7 +2056,6 @@ with st.sidebar:
     sim_ariza_gun = st.selectbox("Arıza Günü", gun_secenekleri)
     sim_ariza_makine = st.selectbox("Arızalanacak Makine", MAKINE_LISTESI)
     
-    # 08:00 - 03:45 saat dilimi listesi
     saat_dilimleri = []
     for h in range(8, 24):
       for m in [0, 15, 30, 45]:
@@ -2181,7 +2158,7 @@ if st.session_state["results"] is not None:
 
   st.markdown("---")
 
-  # Sabit Sekme Seçici (State-Controlled Tab)
+  # Sabit Sekme Seçici
   tab_options = [
       "📊 Yönetici Özeti",
       "🔍 Denetim Logu",
@@ -2213,8 +2190,57 @@ if st.session_state["results"] is not None:
     st.pyplot(results["fig_hm"])
     
   elif current_tab == "👥 İşgücü Analizi":
-    st.subheader("Saatlik İşgücü İhtiyacı Analizi")
-    st.pyplot(results["fig_op"])
+    st.subheader("İşgücü İhtiyacı Seviyelendirme Analizi")
+    
+    # Görünüm Seçimi (Haftalık Ortalama vs Gün Bazlı)
+    isgucu_secenekleri = ["📊 Haftalık Genel Ortalama"] + list(results["gunluk_saatlik_isgucu"].keys())
+    secilen_isgucu_gorunumu = st.selectbox("İşgücü Görünümü Seçin:", isgucu_secenekleri)
+    
+    mesai_h = results["mesai_h"]
+    saatler = [f"{8+i:02d}:00" if 8+i < 24 else f"{8+i-24:02d}:00" for i in range(mesai_h)]
+    
+    if secilen_isgucu_gorunumu == "📊 Haftalık Genel Ortalama":
+      toplam_saatlik = [0.0] * mesai_h
+      for g_isim, g_vals in results["gunluk_saatlik_isgucu"].items():
+        for h_i, val in enumerate(g_vals):
+          toplam_saatlik[h_i] += val
+      gosterilecek_isgucu = [round(v / max(1, results["gun_sayisi"]), 1) for v in toplam_saatlik]
+      grafik_baslik = "Haftalık Ortalama Saatlik İşgücü İhtiyacı (Kişi / Saat)"
+    else:
+      gosterilecek_isgucu = [round(v, 1) for v in results["gunluk_saatlik_isgucu"][secilen_isgucu_gorunumu]]
+      grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat)"
+
+    # Özet Kartlar
+    peak_val = max(gosterilecek_isgucu) if gosterilecek_isgucu else 0.0
+    avg_val = round(sum(gosterilecek_isgucu) / max(1, len(gosterilecek_isgucu)), 1)
+    gunduz_avg = round(sum(gosterilecek_isgucu[:10]) / 10.0, 1) if len(gosterilecek_isgucu) >= 10 else 0.0
+    gece_avg = round(sum(gosterilecek_isgucu[10:]) / max(1, len(gosterilecek_isgucu[10:])), 1)
+
+    c_ig1, c_ig2, c_ig3, c_ig4 = st.columns(4)
+    c_ig1.metric("En Yüksek İhtiyaç (Peak)", f"{peak_val:.1f} Kişi")
+    c_ig2.metric("Ortalama Vardiya Yükü", f"{avg_val:.1f} Kişi")
+    c_ig3.metric("Gündüz (08:00 - 18:00)", f"{gunduz_avg:.1f} Kişi")
+    c_ig4.metric("Gece (18:00 - 04:00)", f"{gece_avg:.1f} Kişi")
+
+    # Çubuk Grafik Çizimi
+    fig_dinamik_ig, ax_dig = plt.subplots(figsize=(11.5, 3.4), dpi=200)
+    fig_dinamik_ig.patch.set_facecolor("#FFFFFF")
+    bars_dig = ax_dig.bar(range(mesai_h), gosterilecek_isgucu, color="#2E6BA8", alpha=0.85, edgecolor="#1F4E78", width=0.65)
+    ax_dig.set_xticks(range(mesai_h))
+    ax_dig.set_xticklabels(saatler, rotation=45, ha="right", fontsize=9, fontweight="bold")
+    ax_dig.set_title(grafik_baslik, fontsize=11, fontweight="bold", pad=14)
+    ax_dig.set_ylabel("Gereken İşgücü (Kişi)", fontsize=10, fontweight="bold")
+    ax_dig.set_xlabel("Günün Saatleri (08:00 - 04:00 Mesai Penceresi)", fontsize=10, fontweight="bold", labelpad=8)
+    ax_dig.grid(axis="y", linestyle="--", alpha=0.5)
+
+    for bar in bars_dig:
+      h = bar.get_height()
+      if h > 0.0:
+        ax_dig.text(bar.get_x() + bar.get_width()/2, h + 0.3, f"{h:.1f}", ha='center', va='bottom', fontsize=8.5, fontweight='bold')
+
+    ax_dig.set_ylim(0, max(peak_val * 1.25, 5.0))
+    plt.tight_layout()
+    st.pyplot(fig_dinamik_ig)
 
   elif current_tab == "📊 Gantt Şeması":
     st.subheader("Üretim Zaman Çizelgesi (Gantt)")
