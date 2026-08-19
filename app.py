@@ -982,7 +982,6 @@ def run_scheduler_pipeline(
     toplam_gerceklesen_genel += day_realized
     toplam_eksik_genel += day_unfulfilled
 
-    # Saf Süt Basma + 100T CIP + Hazırlık Payı (Efektif P6 Meşguliyeti)
     p6_day_pumping_hours = day_realized / p6_debi
     p6_cip_count = max(0, int(day_realized // p6_cip_limit))
     p6_cip_hours = p6_cip_count * p6_cip_suresi
@@ -1661,9 +1660,8 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (VARSAYILANA SIFIRLAMA BUTONLU)
+# STREAMLIT KULLANICI ARAYÜZÜ (DEMO FABRİKA VERİSİ & WHAT-IF MİMARİSİ)
 # ==============================================================================
-# Varsayılan Parametre Değerleri
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
     "kultur_suresi": 1.5,
@@ -1675,7 +1673,6 @@ DEFAULT_PARAMS = {
     "makine_max_calisma": 8.5,
 }
 
-# Session state ilk yükleme kontrolü
 for k, v in DEFAULT_PARAMS.items():
   if k not in st.session_state:
     st.session_state[k] = v
@@ -1693,12 +1690,60 @@ st.markdown(
 )
 
 with st.sidebar:
-  st.header("📂 1. Veri Yükleme")
-  uploaded_file = st.file_uploader(
-      "Projeksiyon Excel Dosyası Seçin (.xlsx)", type=["xlsx"]
-  )
-  st.markdown("---")
+  st.header("📂 1. Veri Kaynağı")
 
+  # Sunum için Demo Verisi Seçeneği
+  veri_secenegi = st.radio(
+      "Veri Yöntemini Seçin:",
+      ("🏭 Sütaş Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"),
+      index=0,
+  )
+
+  active_excel_source = None
+
+  if veri_secenegi == "📁 Kendi Excel Dosyamı Yükle":
+    uploaded_file = st.file_uploader(
+        "Projeksiyon Excel Dosyası Seçin (.xlsx)", type=["xlsx"]
+    )
+    if uploaded_file is not None:
+      active_excel_source = uploaded_file
+  else:
+    # Repodaki mevcut projeksiyon dosyalarını ara
+    olasi_dosyalar = [
+        "haftalik_projeksiyon.xlsx",
+        "projeksiyon.xlsx",
+        "Sutas_Projeksiyon.xlsx",
+        "haftalık_projeksiyon.xlsx",
+    ]
+    bulunan_dosya = None
+    for d_adi in olasi_dosyalar:
+      if os.path.exists(d_adi):
+        bulunan_dosya = d_adi
+        break
+
+    if bulunan_dosya:
+      active_excel_source = bulunan_dosya
+      st.success(f"✅ Hazır fabrika verisi yüklendi: `{bulunan_dosya}`")
+    else:
+      # Eğer repoda excel yoksa dinamik standart haftalık demo verisi oluştur
+      demo_wb_buf = io.BytesIO()
+      demo_wb = openpyxl.Workbook()
+      demo_wb.remove(demo_wb.active)
+      gun_isimleri = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma"]
+      for g_isim in gun_isimleri:
+        ws = demo_wb.create_sheet(title=g_isim)
+        ws.append(["Açıklama", "Mamül (kg)", "Süt Tipi", "Gramaj"])
+        ws.append(["SÜTAŞ TAM YAĞLI YOĞURT", 45000, "TAM YAĞLI", "1000g"])
+        ws.append(["SÜTAŞ YARIM YAĞLI YOĞURT", 40000, "YARIM YAĞLI", "650g"])
+        ws.append(["SÜTAŞ %5 YAĞLI KAYMAKSIZ", 35000, "%5 YAĞLI", "1250g"])
+        ws.append(["SÜTAŞ KOVA TAM YAĞLI", 30000, "TAM YAĞLI", "10000g"])
+        ws.append(["PAKSÜT HOMOJENİZE", 15000, "PAKSÜT", "10000g"])
+      demo_wb.save(demo_wb_buf)
+      demo_wb_buf.seek(0)
+      active_excel_source = demo_wb_buf
+      st.info("ℹ️ Sütaş Karacabey standart haftalık üretim projeksiyonu hazır.")
+
+  st.markdown("---")
   st.header("🎛️ 2. Senaryo & Parametre Ayarları (What-If)")
 
   with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=True):
@@ -1769,7 +1814,6 @@ with st.sidebar:
         help="Dolum makinelerinin kesintisiz çalışabileceği azami süre (sonrası hat CIP).",
     )
 
-  # Varsayılana Sıfırlama Butonu
   st.button(
       "🔄 Parametreleri Varsayılana Sıfırla",
       on_click=varsayilana_sifirla,
@@ -1812,11 +1856,13 @@ with st.sidebar:
 if "results" not in st.session_state:
   st.session_state["results"] = None
 
-if uploaded_file is not None:
-  if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary"):
+if active_excel_source is not None:
+  if st.button(
+      "🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run"
+  ):
     with st.spinner("Matematiksel kısıtlar ve senaryo hesaplanıyor..."):
       st.session_state["results"] = run_scheduler_pipeline(
-          excel_source=uploaded_file,
+          excel_source=active_excel_source,
           p6_debi=sim_p6_debi,
           kultur_suresi=sim_kultur_suresi,
           tank_cip_suresi=sim_tank_cip_suresi,
@@ -1835,7 +1881,7 @@ if st.session_state["results"] is not None:
   col1, col2, col3 = st.columns(3)
   col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
   col2.metric(
-      "Efektif Hat Doygunluğu (CIP Dahil)",
+      "P6 Efektif Hat Doygunluğu",
       f"%{results['genel_p6_oee']:.1f}",
   )
   col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
@@ -1884,7 +1930,7 @@ if st.session_state["results"] is not None:
       st.dataframe(
           results["gunluk_cizelgeler"][selected_day], use_container_width=True
       )
-elif uploaded_file is None:
+elif active_excel_source is None:
   st.warning(
       "👈 Başlamak için lütfen sol menüden bir Excel (.xlsx) dosyası yükleyin."
   )
