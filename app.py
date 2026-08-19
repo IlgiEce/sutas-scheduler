@@ -982,6 +982,7 @@ def run_scheduler_pipeline(
     toplam_gerceklesen_genel += day_realized
     toplam_eksik_genel += day_unfulfilled
 
+    # Saf Süt Basma + 100T CIP + Hazırlık Payı (Efektif P6 Meşguliyeti)
     p6_day_pumping_hours = day_realized / p6_debi
     p6_cip_count = max(0, int(day_realized // p6_cip_limit))
     p6_cip_hours = p6_cip_count * p6_cip_suresi
@@ -1098,7 +1099,7 @@ def run_scheduler_pipeline(
       ),
   )
 
-  # 5. CIP Yıkama Devreleri (Hat 1 & 2): Doğrudan Gerçekleşen Makine Yıkama Süresi ve Tonaj Oranından
+  # 5. CIP Yıkama Devreleri (Hat 1 & 2): Tonaj ve Çalışma Sıklığına Canlı Bağlı
   tonaj_carpan = ort_gerceklesen / 163.2
   doygunluk_cip = min(
       100.0,
@@ -1660,8 +1661,31 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (KASE GRUBU & %89.6 EFEKTİF DOYGUNLUK MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (VARSAYILANA SIFIRLAMA BUTONLU)
 # ==============================================================================
+# Varsayılan Parametre Değerleri
+DEFAULT_PARAMS = {
+    "p6_debi": 10.0,
+    "kultur_suresi": 1.5,
+    "max_kultur_bekleme": 6.0,
+    "p6_cip_limit": 100.0,
+    "p6_cip_suresi": 1.0,
+    "mesai_saati": 20.0,
+    "tank_cip_suresi": 1.0,
+    "makine_max_calisma": 8.5,
+}
+
+# Session state ilk yükleme kontrolü
+for k, v in DEFAULT_PARAMS.items():
+  if k not in st.session_state:
+    st.session_state[k] = v
+
+
+def varsayilana_sifirla():
+  for key, val in DEFAULT_PARAMS.items():
+    st.session_state[key] = val
+
+
 st.title("🏭 Sütaş Karacabey Yoğurt Hattı Master Scheduler")
 st.markdown(
     "Haftalık üretim projeksiyon dosyasını yükleyin; pastörizatör, tank ve CIP"
@@ -1682,40 +1706,40 @@ with st.sidebar:
         "P6 Debi Hızı (Ton / Saat)",
         min_value=6.0,
         max_value=18.0,
-        value=10.0,
         step=0.5,
+        key="p6_debi",
         help="P6 pastörizatörünün saatlik nominal süt basma debisi.",
     )
     sim_kultur_suresi = st.slider(
         "Mayalama (Kültür) Süresi (Saat)",
         min_value=0.5,
         max_value=3.0,
-        value=1.5,
         step=0.25,
+        key="kultur_suresi",
         help="Tank dolumu bittikten sonra sütün mayalanıp hazır olma süresi.",
     )
     sim_max_kultur_bekleme = st.slider(
         "Maks. Mayalı Bekleme Limiti (Saat)",
         min_value=3.0,
         max_value=10.0,
-        value=6.0,
         step=0.5,
+        key="max_kultur_bekleme",
         help="Mayalanan sütün asitleşme/bozulma olmadan tüketilmesi gereken azami süre.",
     )
     sim_p6_cip_limit = st.number_input(
         "P6 CIP Yıkama Limiti (Ton)",
         min_value=50.0,
         max_value=200.0,
-        value=100.0,
         step=10.0,
+        key="p6_cip_limit",
         help="P6'nın aralıksız basabileceği azami tonaj sınırı (aşılınca 1 sa CIP zorunlu).",
     )
     sim_p6_cip_suresi = st.slider(
         "P6 CIP Yıkama Süresi (Saat)",
         min_value=0.5,
         max_value=2.0,
-        value=1.0,
         step=0.25,
+        key="p6_cip_suresi",
         help="100T aşıldığında uygulanan ara yıkama süresi.",
     )
 
@@ -1724,26 +1748,33 @@ with st.sidebar:
         "Günlük Mesai Penceresi (Saat)",
         min_value=16.0,
         max_value=24.0,
-        value=20.0,
         step=1.0,
+        key="mesai_saati",
         help="08:00 başlangıçlı vardiya süresi (20 Sa = 04:00 mesai sonu).",
     )
     sim_tank_cip_suresi = st.slider(
         "Tank CIP Süresi (Saat)",
         min_value=0.5,
         max_value=2.0,
-        value=1.0,
         step=0.25,
+        key="tank_cip_suresi",
         help="Tank boşaldıktan sonra yeni parti doluma kadar geçen kimyasal yıkama süresi.",
     )
     sim_makine_max_calisma = st.slider(
         "Maks. Ardışık Makine Çalışması (Saat)",
         min_value=4.0,
         max_value=12.0,
-        value=8.5,
         step=0.5,
+        key="makine_max_calisma",
         help="Dolum makinelerinin kesintisiz çalışabileceği azami süre (sonrası hat CIP).",
     )
+
+  # Varsayılana Sıfırlama Butonu
+  st.button(
+      "🔄 Parametreleri Varsayılana Sıfırla",
+      on_click=varsayilana_sifirla,
+      use_container_width=True,
+  )
 
   st.markdown("---")
   st.header("🔒 3. Sabit Tesis & Fiziksel Kısıtlar")
@@ -1804,7 +1835,7 @@ if st.session_state["results"] is not None:
   col1, col2, col3 = st.columns(3)
   col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
   col2.metric(
-      "P6 Efektif Hat Doygunluğu",
+      "Efektif Hat Doygunluğu (CIP Dahil)",
       f"%{results['genel_p6_oee']:.1f}",
   )
   col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
