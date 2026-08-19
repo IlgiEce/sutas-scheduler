@@ -487,10 +487,8 @@ def gunluk_tank_hazirligi_v80(
         night_p6 = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
-        # DÜZELTME: Kültür, P6 dolumu biter bitmez başlar
-        kultur_bas = t_p6_end
-        t_hazir_olma = kultur_bas + datetime.timedelta(hours=kultur_suresi)
-        actual_ready = max(gun_baslangic, t_hazir_olma)
+        actual_ready = max(gun_baslangic, t_p6_end + datetime.timedelta(hours=kultur_suresi))
+        kultur_bas = actual_ready - datetime.timedelta(hours=kultur_suresi)
 
         durum_analizi = ""
         if p6_kuyruk_dk > 0:
@@ -502,9 +500,9 @@ def gunluk_tank_hazirligi_v80(
 
         if actual_ready > gun_baslangic:
             gecikme_dk = int((actual_ready - gun_baslangic).total_seconds() / 60)
-            durum_analizi += f" 👉 08:00'e yetişemedi ({gecikme_dk} dk gecikme: Kültür {kultur_bas.strftime('%H:%M')} -> Hazır {actual_ready.strftime('%H:%M')})."
+            durum_analizi += f" 👉 08:00'e yetişemedi ({gecikme_dk} dk gecikme: JIT Kültür {kultur_bas.strftime('%H:%M')} -> Hazır {actual_ready.strftime('%H:%M')})."
         else:
-            durum_analizi += f" 👉 08:00 vardiya başlangıcına zamanında yetişti (Kültür: {kultur_bas.strftime('%H:%M')})."
+            durum_analizi += f" 👉 08:00 vardiya başlangıcına zamanında yetişti (JIT Kültür: {kultur_bas.strftime('%H:%M')})."
 
         tanks[tk_name] = {
             "kapasite": cap,
@@ -804,10 +802,9 @@ def run_scheduler_pipeline(
                 t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
                 toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req, MAKINE_LISTESI)
 
-                # DÜZELTME: Kalan mesai süresi hesabı
                 kalan_mesai_saati = max(
                     0.0,
-                    (cutoff_0400 - (t_p6_start_earliest + datetime.timedelta(hours=kultur_suresi))).total_seconds() / 3600.0,
+                    (cutoff_0400 - (t_p6_start_earliest + datetime.timedelta(hours=1.0 + kultur_suresi))).total_seconds() / 3600.0,
                 )
                 max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
                 rem_demand_st = sum(o["rem_ton"] for o in order_pool if o["süt_tipi"] == st_req)
@@ -823,16 +820,17 @@ def run_scheduler_pipeline(
                     continue
 
                 dolum_suresi = fill_amount / p6_debi
-
-                # DÜZELTME: Ters JIT geciktirmesi kaldırıldı, P6 en erken müsait anda doluma başlar
-                t_p6_start_actual = t_p6_start_earliest
+                t_p6_start_jit = max(
+                    t_p6_start_earliest,
+                    p_start - datetime.timedelta(hours=dolum_suresi + kultur_suresi),
+                )
 
                 if p6_state["kumulatif_ton"] + fill_amount > p6_cip_limit:
-                    t_p6_start_actual = max(t_p6_start_actual, t_cip_end) + datetime.timedelta(hours=p6_cip_suresi)
+                    t_p6_start_jit = max(t_p6_start_jit, t_cip_end) + datetime.timedelta(hours=p6_cip_suresi)
                     p6_state["kumulatif_ton"] = 0.0
                     cip_notu += f" | 🧼 P6 {int(p6_cip_limit)}T CIP ({p6_cip_suresi} Sa)"
 
-                p6_end = t_p6_start_actual + datetime.timedelta(hours=dolum_suresi)
+                p6_end = t_p6_start_jit + datetime.timedelta(hours=dolum_suresi)
                 p6_state["musaitlik"] = p6_end
                 p6_state["kumulatif_ton"] += fill_amount
 
