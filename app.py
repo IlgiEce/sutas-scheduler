@@ -474,11 +474,11 @@ def gunluk_tank_hazirligi_v80(
   return tanks
 
 
-def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic):
+def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20.0):
   gunduz_bas = gun_baslangic
-  gunduz_bit = gun_baslangic + datetime.timedelta(hours=10)
+  gunduz_bit = gun_baslangic + datetime.timedelta(hours=min(10.0, mesai_saati))
   gece_bas = gunduz_bit
-  gece_bit = gun_baslangic + datetime.timedelta(hours=20)
+  gece_bit = gun_baslangic + datetime.timedelta(hours=mesai_saati)
 
   gunduz_ornekleri = []
   t = gunduz_bas
@@ -526,12 +526,13 @@ def run_scheduler_pipeline(
 ):
   xls = pd.ExcelFile(excel_source)
   baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
+  mesai_h = int(gunluk_mesai_saati)
 
   gunluk_cizelgeler = {}
   gunluk_eksikler = {}
   gunluk_makine_istatistikleri = {m: 0.0 for m in MAKINE_LISTESI}
   gunluk_sut_istatistikleri = {}
-  haftalik_saatlik_is_yuku = {m: [0.0] * 20 for m in MAKINE_LISTESI}
+  haftalik_saatlik_is_yuku = {m: [0.0] * mesai_h for m in MAKINE_LISTESI}
   audit_log_list = []
 
   tank_states = {
@@ -915,7 +916,9 @@ def run_scheduler_pipeline(
       cur_t = p_start
       while cur_t < p_end:
         h_idx = int((cur_t - gun_baslangic).total_seconds() // 3600)
-        if 0 <= h_idx < int(gunluk_mesai_saati):
+        if 0 <= h_idx < mesai_h and h_idx < len(
+            haftalik_saatlik_is_yuku[chosen_m_name]
+        ):
           next_hour = gun_baslangic + datetime.timedelta(hours=h_idx + 1)
           work_in_this_hour = (
               min(p_end, next_hour) - cur_t
@@ -991,7 +994,7 @@ def run_scheduler_pipeline(
     )
 
     gunduz_ekip, gece_ekip = vardiya_ekip_ortalamasi_hesapla(
-        machines, gun_baslangic
+        machines, gun_baslangic, mesai_saati=gunluk_mesai_saati
     )
 
     doygunluk_raporu.append({
@@ -1417,7 +1420,7 @@ def run_scheduler_pipeline(
   img_db1.height = 320
   ws_db.add_image(img_db1, "A11")
 
-  # 📊 Figür 4: Heatmap
+  # 📊 Figür 4: Heatmap (Dinamik Mesai Boyutu)
   fig_hm, ax_hm = plt.subplots(figsize=(11.5, 3.6), dpi=200)
   fig_hm.patch.set_facecolor("#FFFFFF")
   hm_data = []
@@ -1427,10 +1430,11 @@ def run_scheduler_pipeline(
     )
 
   saatler = [
-      f"{8+i:02d}:00" if 8 + i < 24 else f"{8+i-24:02d}:00" for i in range(20)
+      f"{8+i:02d}:00" if 8 + i < 24 else f"{8+i-24:02d}:00"
+      for i in range(mesai_h)
   ]
   cax = ax_hm.imshow(hm_data, cmap="YlGnBu", aspect="auto")
-  ax_hm.set_xticks(range(20))
+  ax_hm.set_xticks(range(mesai_h))
   ax_hm.set_xticklabels(saatler, rotation=45, ha="right", fontsize=8)
   ax_hm.set_yticks(range(len(MAKINE_LISTESI)))
   ax_hm.set_yticklabels(MAKINE_LISTESI, fontsize=9)
@@ -1442,7 +1446,7 @@ def run_scheduler_pipeline(
       pad=12,
   )
   ax_hm.set_xlabel(
-      "Günün Saatleri (08:00 - 04:00 Mesai Penceresi)",
+      f"Günün Saatleri (08:00 Başlangıçlı {mesai_h} Saatlik Mesai Penceresi)",
       fontsize=9,
       fontweight="bold",
   )
