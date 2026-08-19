@@ -802,14 +802,11 @@ def run_scheduler_pipeline(
           "rem_ton": s["tonaj_ton"],
       })
 
-    # DİNAMİK KOVA ÖNCELİKLENDİRMESİ: Özel kalıpları (2kg ve 5kg) öne al
+    # Orijinal sıralama stratejisi
     if "Geçiş" in opt_mode:
-      order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"] != "KOVA_10KG"))
+      order_pool.sort(key=lambda x: (x["süt_tipi"], x["makine_hedef"]))
     elif "Makespan" in opt_mode:
-      order_pool.sort(key=lambda x: (x["makine_hedef"] == "KOVA_10KG", -x["rem_ton"]))
-    else:
-      # Standart JIT: Özel kova kalıplarını (2kg Büyük Kova, 5kg Küçük Kova) önceliklendir
-      order_pool.sort(key=lambda x: (x["makine_hedef"] == "KOVA_10KG", -x["rem_ton"]))
+      order_pool.sort(key=lambda x: x["rem_ton"], reverse=True)
 
     schedule = []
 
@@ -843,7 +840,6 @@ def run_scheduler_pipeline(
       if not candidate_actions:
         break
 
-      # En erken boşa çıkan makineyi seç
       candidate_actions.sort(key=lambda x: x[1])
       chosen_m_name = candidate_actions[0][0]
       m_info = machines[chosen_m_name]
@@ -878,24 +874,19 @@ def run_scheduler_pipeline(
           <= max_kultur_bekleme
       ]
 
-      # DİNAMİK KOVA ATAMA STRATEJİSİ:
-      # Eğer makine Büyük Kova ise önce 2000g, Küçük Kova ise önce 5000g ara; yoksa 10kg ortak havuzdan al
       matching_orders = [
           o
           for o in order_pool
           if o["rem_ton"] > 0.01
-          and o["makine_hedef"] == chosen_m_name
+          and (
+              o["makine_hedef"] == chosen_m_name
+              or (
+                  o["makine_hedef"] == "KOVA_10KG"
+                  and chosen_m_name in ["Küçük Kova", "Büyük Kova"]
+              )
+          )
           and o["süt_tipi"] in ready_st_list
       ]
-      
-      if not matching_orders and chosen_m_name in ["Küçük Kova", "Büyük Kova"]:
-        matching_orders = [
-            o
-            for o in order_pool
-            if o["rem_ton"] > 0.01
-            and o["makine_hedef"] == "KOVA_10KG"
-            and o["süt_tipi"] in ready_st_list
-        ]
 
       if not matching_orders:
         matching_orders = [
