@@ -16,11 +16,17 @@ import plotly.graph_objects as go
 import re
 
 # ==============================================================================
+# GELİŞTİRİCİ & TELİF TANIMLARI (BURAYI KENDİ ADINIZLA DOLDURUN)
+# ==============================================================================
+DEVELOPER_NAME = "İlgi Ece Çakmak"  # Geliştirici & Telif Sahibi
+SUTAS_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png"
+
+# ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
 # ==============================================================================
 st.set_page_config(
     page_title="Sütaş Karacabey Master Scheduler & DSS",
-    page_icon="🥛",
+    page_icon="https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -28,7 +34,7 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
+ADMIN_PIN = "1661"  # 4 Haneli Yönetici Şifresi
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -50,7 +56,13 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
+    col_log1, col_log2 = st.columns([1, 4])
+    with col_log1:
+ #İLGİ ECE ÇAKMAK
+        st.image(SUTAS_LOGO_URL, width=130)
+    with col_log2:
+        st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
+        st.caption(f"🚀 Tasarım & Algoritmik Modelleme: **{İLGİ ECE ÇAKMAK}**")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -1492,10 +1504,20 @@ def varsayilana_sifirla():
     st.rerun()
 
 
-st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
-st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
+# ------------------------------------------------------------------------------
+# SAYFA ÜSTÜ: LOGO & TELİF ROZETİ
+# ------------------------------------------------------------------------------
+col_head1, col_head2 = st.columns([1, 5])
+with col_head1:
+    st.image(SUTAS_LOGO_URL, width=140)
+with col_head2:
+    st.title("Sütaş Karacabey Master Scheduler & DSS")
+    st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Tasarım & Algoritmik Modelleme:** `{İLGİ ECE ÇAKMAK}`")
 
 with st.sidebar:
+    # Sidebar En Üst Logo
+    st.image(SUTAS_LOGO_URL, width=130)
+    
     # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
     if st.session_state["is_admin"]:
         st.success(f"👑 **Yönetici Modu Açık**")
@@ -1676,6 +1698,9 @@ with st.sidebar:
         * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
         """)
 
+    st.markdown("---")
+    st.caption(f"🛡️ © 2026 Sütaş DSS Platformu\n\n**Geliştirici:** {İLGİ ECE ÇAKMAK}")
+
 # ==============================================================================
 # HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
 # ==============================================================================
@@ -1832,7 +1857,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
             {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtlerin)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
             {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
@@ -1987,6 +2012,21 @@ if st.session_state["results"] is not None:
             df_to_show = results["gunluk_cizelgeler"][selected_day]
             display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi"], errors="ignore")
             st.dataframe(display_df, use_container_width=True)
+
+# ------------------------------------------------------------------------------
+# SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
+# ------------------------------------------------------------------------------
+st.markdown("---")
+st.markdown(
+    f"""
+    <div style="text-align: center; color: #595959; font-size: 13px; padding: 15px 0;">
+        <b>🏭 Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
+        Tasarım, Matematiksel Modelleme & Çizelgeleme Mimarisi: <b>{İLGİ ECE ÇAKMAK}</b><br>
+        <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 elif active_excel_source is None:
     st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
