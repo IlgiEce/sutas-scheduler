@@ -47,6 +47,27 @@ def isim_gecerli_mi(isim: str) -> bool:
     return True
 
 
+def sheet_log_kaydet(kullanici_etiketi: str):
+    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
+    try:
+        from streamlit_gsheets import GSheetsConnection
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        try:
+            df_log = conn.read(ttl=0)
+            if df_log is None or df_log.empty:
+                df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+        except Exception:
+            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+        
+        df_log = df_log.dropna(how="all")
+        new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": kullanici_etiketi}])
+        df_updated = pd.concat([df_log, new_row], ignore_index=True)
+        conn.update(data=df_updated)
+    except Exception:
+        pass
+
+
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
 if "is_admin" not in st.session_state:
@@ -55,69 +76,56 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    st.markdown("## 🏭 Sütaş Karacabey Master Scheduler & DSS")
+    # Sayfa ortasında derli toplu ve kibar giriş kartı
+    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     
-    if not st.session_state["admin_login_mode"]:
-        st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
-        with st.form("login_form"):
-            user_name = st.text_input("Ad Soyad:")
-            submit_btn = st.form_submit_button("Sisteme Giriş Yap")
-            
-            if submit_btn:
-                temiz_isim = user_name.strip()
-                if not isim_gecerli_mi(temiz_isim):
-                    st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol, rakam veya tek harf kullanılamaz).")
-                else:
-                    st.session_state["auth_user"] = temiz_isim.title()
-                    st.session_state["is_admin"] = False
-                    
-                    # Türkiye Saati (UTC+3)
-                    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
-                    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
-                    
-                    # Google Sheets Bağlantısı
-                    try:
-                        from streamlit_gsheets import GSheetsConnection
-                        conn = st.connection("gsheets", type=GSheetsConnection)
-                        try:
-                            df_log = conn.read(ttl=0)
-                            if df_log is None or df_log.empty:
-                                df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
-                        except Exception:
-                            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
-                        
-                        df_log = df_log.dropna(how="all")
-                        new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": temiz_isim.title()}])
-                        df_updated = pd.concat([df_log, new_row], ignore_index=True)
-                        conn.update(data=df_updated)
-                    except Exception:
-                        pass
-                    
-                    st.rerun()
+    with col_l2:
+        st.markdown("## 🏭 Sütaş Karacabey Scheduler & DSS")
+        
+        if not st.session_state["admin_login_mode"]:
+            st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı girip Enter'a basınız.")
+            with st.form("login_form", clear_on_submit=False):
+                user_name = st.text_input("Ad Soyad:", placeholder="örn: Ahmet Yılmaz")
+                submit_btn = st.form_submit_button("Sisteme Giriş Yap ↵", use_container_width=True, type="primary")
+                
+                if submit_btn:
+                    temiz_isim = user_name.strip()
+                    if not isim_gecerli_mi(temiz_isim):
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol veya rakam kullanılamaz).")
+                    else:
+                        st.session_state["auth_user"] = temiz_isim.title()
+                        st.session_state["is_admin"] = False
+                        sheet_log_kaydet(temiz_isim.title())
+                        st.rerun()
 
-        st.markdown("---")
-        if st.button("👑 Yönetici Olarak Devam Et"):
-            st.session_state["admin_login_mode"] = True
-            st.rerun()
+            st.markdown("---")
+            if st.button("👑 Yönetici Olarak Devam Et", use_container_width=True):
+                st.session_state["admin_login_mode"] = True
+                st.rerun()
 
-    else:
-        st.warning("🔒 **Yönetici Giriş Paneli**")
-        with st.form("admin_form"):
-            pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
-            admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap")
-            
-            if admin_submit:
-                if pin_input == ADMIN_PIN:
-                    st.session_state["auth_user"] = "Sistem Yöneticisi"
-                    st.session_state["is_admin"] = True
-                    st.session_state["admin_login_mode"] = False
-                    st.rerun()
-                else:
-                    st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
+        else:
+            st.warning("🔒 **Yönetici Giriş Paneli**")
+            with st.form("admin_form", clear_on_submit=False):
+                admin_name = st.text_input("Yönetici Ad Soyad:", placeholder="örn: İlgi Ece Çakmak")
+                pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
+                admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap ↵", use_container_width=True, type="primary")
+                
+                if admin_submit:
+                    temiz_isim = admin_name.strip()
+                    if not isim_gecerli_mi(temiz_isim):
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
+                    elif pin_input != ADMIN_PIN:
+                        st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
+                    else:
+                        st.session_state["auth_user"] = f"{temiz_isim.title()} (Yönetici)"
+                        st.session_state["is_admin"] = True
+                        st.session_state["admin_login_mode"] = False
+                        sheet_log_kaydet(f"{temiz_isim.title()} (Yönetici)")
+                        st.rerun()
 
-        if st.button("⬅️ Kullanıcı Girişine Dön"):
-            st.session_state["admin_login_mode"] = False
-            st.rerun()
+            if st.button("⬅️ Kullanıcı Girişine Dön", use_container_width=True):
+                st.session_state["admin_login_mode"] = False
+                st.rerun()
 
     st.stop()
 
@@ -250,7 +258,6 @@ DEFAULT_FACTORY_DATA = {
     ],
 }
 
-# Açılır listede sunulacak ürün katalog listesi
 URUN_KATALOGU = sorted(list({p[0] for day_rows in DEFAULT_FACTORY_DATA.values() for p in day_rows}))
 
 
@@ -1496,6 +1503,8 @@ def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
     st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
+    st.session_state["results"] = None
+    st.session_state["selected_tab"] = "📊 Yönetici Özeti"
     st.rerun()
 
 
@@ -1506,6 +1515,11 @@ st.title("🏭 Sütaş Karacabey Master Scheduler & DSS")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
+    # 🏠 ANASAYFAYA DÖN / SIFIRLA BUTONU
+    if st.button("🏠 Anasayfa & Varsayılana Dön", use_container_width=True, type="secondary"):
+        varsayilana_sifirla()
+
+    st.markdown("---")
     st.markdown("## 🏭 Fabrika Kontrol Paneli")
     
     if st.session_state["is_admin"]:
@@ -1521,7 +1535,8 @@ with st.sidebar:
             if st.button("Yetkiyi Yükselt 🔓", key="btn_elevate", use_container_width=True):
                 if elevate_pin == ADMIN_PIN:
                     st.session_state["is_admin"] = True
-                    st.session_state["auth_user"] = "Sistem Yöneticisi"
+                    st.session_state["auth_user"] = f"{st.session_state['auth_user']} (Yönetici)"
+                    sheet_log_kaydet(f"{st.session_state['auth_user']} [Mod Yükseltme]")
                     st.rerun()
                 else:
                     st.error("❌ Hatalı PIN!")
@@ -1570,6 +1585,7 @@ with st.sidebar:
             sim_opt_mode = st.radio(
                 "Algoritma Hedefi:",
                 ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
+                help="• Sezgisel JIT: Sütü tam vaktinde mayalayarak tank beklemesini sıfırlar.\n• Min-Geçiş: Aynı reçete ve kalıpları ardışık dizerek CIP duruşlarını minimize eder.\n• Min-Makespan: En büyük siparişleri önceleyerek vardiya bitiş süresini erkene çeker."
             )
     else:
         st.header("🎛️ 2. Aktif Fabrika Parametreleri 🔒")
