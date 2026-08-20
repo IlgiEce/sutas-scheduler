@@ -11,6 +11,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
+import re
 
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
@@ -23,89 +24,111 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# KULLANICI GİRİŞ VE GOOGLE SHEETS / LOG KAYDI
+# KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-import re
+ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
-    
-    # 1. Sadece Türkçe/İngilizce harfler ve boşluk kabul et (Rakam, sembol, * yasak)
     if not re.fullmatch(r"^[a-zA-ZçÇğĞıİöÖşŞüÜ\s]+$", isim):
         return False
-    
-    # 2. En az 2 kelime olmalı (Ad ve Soyad)
     kelimeler = isim.split()
     if len(kelimeler) < 2:
         return False
-    
-    # 3. Her kelime en az 2 harften oluşmalı ('a', 'x' gibi tek harfleri engeller)
     if any(len(k) < 2 for k in kelimeler):
         return False
-        
     return True
 
 
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
+if "is_admin" not in st.session_state:
+    st.session_state["is_admin"] = False
+if "admin_login_mode" not in st.session_state:
+    st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
     st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
-    st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
     
-    with st.form("login_form"):
-        user_name = st.text_input("Ad Soyad:")
-        submit_btn = st.form_submit_button("Sisteme Giriş Yap")
-        
-        if submit_btn:
-            temiz_isim = user_name.strip()
+    if not st.session_state["admin_login_mode"]:
+        st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
+        with st.form("login_form"):
+            user_name = st.text_input("Ad Soyad:")
+            submit_btn = st.form_submit_button("Sisteme Giriş Yap")
             
-            if not isim_gecerli_mi(temiz_isim):
-                st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol, rakam veya tek harf kullanılamaz).")
-            else:
-                st.session_state["auth_user"] = temiz_isim.title()
-                
-                # Türkiye Saati (UTC+3)
-                turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
-                log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
-                
-                # 1. Yerel Log Dosyasına Kayıt
-                try:
-                    with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
-                        f.write(f"Zaman: {log_time} | Kullanıcı: {temiz_isim.title()}\n")
-                except Exception:
-                    pass
-                
-                # 2. Google Sheets Bağlantısı (ttl=0 ile önceki kayıtları korur)
-                try:
-                    from streamlit_gsheets import GSheetsConnection
-                    conn = st.connection("gsheets", type=GSheetsConnection)
+            if submit_btn:
+                temiz_isim = user_name.strip()
+                if not isim_gecerli_mi(temiz_isim):
+                    st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol, rakam veya tek harf kullanılamaz).")
+                else:
+                    st.session_state["auth_user"] = temiz_isim.title()
+                    st.session_state["is_admin"] = False
                     
+                    # Türkiye Saati (UTC+3)
+                    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+                    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
+                    
+                    # 1. Yerel Log Dosyasına Kayıt
                     try:
-                        df_log = conn.read(ttl=0)
-                        if df_log is None or df_log.empty:
-                            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                        with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
+                            f.write(f"Zaman: {log_time} | Kullanıcı: {temiz_isim.title()}\n")
                     except Exception:
-                        df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                        pass
                     
-                    # Boş satırları temizle
-                    df_log = df_log.dropna(how="all")
+                    # 2. Google Sheets Bağlantısı
+                    try:
+                        from streamlit_gsheets import GSheetsConnection
+                        conn = st.connection("gsheets", type=GSheetsConnection)
+                        try:
+                            df_log = conn.read(ttl=0)
+                            if df_log is None or df_log.empty:
+                                df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                        except Exception:
+                            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                        
+                        df_log = df_log.dropna(how="all")
+                        new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": temiz_isim.title()}])
+                        df_updated = pd.concat([df_log, new_row], ignore_index=True)
+                        conn.update(data=df_updated)
+                    except Exception:
+                        pass
                     
-                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": temiz_isim.title()}])
-                    df_updated = pd.concat([df_log, new_row], ignore_index=True)
-                    
-                    conn.update(data=df_updated)
-                except Exception:
-                    pass
-                
-                st.rerun()
+                    st.rerun()
+
+        st.markdown("---")
+        if st.button("👑 Yönetici Olarak Devam Et"):
+            st.session_state["admin_login_mode"] = True
+            st.rerun()
+
+    else:
+        st.warning("🔒 **Yönetici Giriş Paneli**")
+        with st.form("admin_form"):
+            pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
+            admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap")
+            
+            if admin_submit:
+                if pin_input == ADMIN_PIN:
+                    st.session_state["auth_user"] = "Sistem Yöneticisi"
+                    st.session_state["is_admin"] = True
+                    st.session_state["admin_login_mode"] = False
+                    st.rerun()
+                else:
+                    st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
+
+        if st.button("⬅️ Kullanıcı Girişine Dön"):
+            st.session_state["admin_login_mode"] = False
+            st.rerun()
+
     st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
 
-# Giriş yapan kullanıcı bilgisi
-st.sidebar.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
+# Sidebar Bilgilendirmesi
+if st.session_state["is_admin"]:
+    st.sidebar.success(f"👑 **Yönetici Girişi:** `{st.session_state['auth_user']}`")
+else:
+    st.sidebar.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
 
 # ==============================================================================
-# MEVCUT UYGULAMA KODLARINIZ (DEĞİŞTİRİLMEDEN DEVAM EDER)
+# MEVCUT UYGULAMA KODLARINIZ
 # ==============================================================================
 plt.rcParams["font.sans-serif"] = "DejaVu Sans"
 plt.rcParams["axes.edgecolor"] = "#D9D9D9"
@@ -235,15 +258,17 @@ DEFAULT_FACTORY_DATA = {
 }
 
 
-def default_excel_stream():
-    for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
-        if os.path.exists(f_name):
-            with open(f_name, "rb") as f:
-                return io.BytesIO(f.read())
+def default_excel_stream(custom_data=None):
+    data_to_use = custom_data if custom_data else DEFAULT_FACTORY_DATA
+    if custom_data is None:
+        for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
+            if os.path.exists(f_name):
+                with open(f_name, "rb") as f:
+                    return io.BytesIO(f.read())
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
-    for sheet_name, rows in DEFAULT_FACTORY_DATA.items():
+    for sheet_name, rows in data_to_use.items():
         ws = wb.create_sheet(title=sheet_name)
         ws.append(["Açıklama", "Süt Karşılığı (Lt)"])
         for row in rows:
@@ -1421,7 +1446,7 @@ def run_scheduler_pipeline(
 
 
 # ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (TAM DSS VE OPTİMİZASYON MİMARİSİ)
+# STREAMLIT KULLANICI ARAYÜZÜ (ROL BAZLI DSS VE OPTİMİZASYON)
 # ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
@@ -1442,10 +1467,14 @@ for k, v in DEFAULT_PARAMS.items():
 if "selected_tab" not in st.session_state:
     st.session_state["selected_tab"] = "📊 Yönetici Özeti"
 
+if "custom_factory_data" not in st.session_state:
+    st.session_state["custom_factory_data"] = None
+
 
 def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
+    st.session_state["custom_factory_data"] = None
     st.rerun()
 
 
@@ -1454,57 +1483,84 @@ st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uyg
 
 with st.sidebar:
     st.header("📂 1. Veri Kaynağı")
-    veri_secenegi = st.radio(
-        "Veri Yöntemini Seçin:",
-        ("🏭 Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"),
-        index=0,
-    )
+    veri_secenekleri = ["🏭 Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
+    if st.session_state["is_admin"]:
+        veri_secenekleri.append("✏️ Ham Veri Düzenleme (Yönetici)")
+
+    veri_secenegi = st.radio("Veri Yöntemini Seçin:", veri_secenekleri, index=0)
 
     active_excel_source = None
     if veri_secenegi == "📁 Kendi Excel Dosyamı Yükle":
         uploaded_file = st.file_uploader("Projeksiyon Excel Dosyası Seçin (.xlsx)", type=["xlsx"])
         if uploaded_file is not None:
             active_excel_source = uploaded_file
+    elif veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
+        st.info("Aşağıdaki sekmeden seçilen günün sipariş tonajlarını doğrudan düzenleyebilirsiniz.")
+        edit_day = st.selectbox("Düzenlenecek Gün:", list(DEFAULT_FACTORY_DATA.keys()))
+        if st.session_state["custom_factory_data"] is None:
+            st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
+        
+        cur_day_data = pd.DataFrame(st.session_state["custom_factory_data"][edit_day], columns=["Açıklama", "Süt Karşılığı (Lt)"])
+        edited_df = st.data_editor(cur_day_data, use_container_width=True, num_rows="dynamic")
+        
+        # Güncellenen veriyi sakla
+        new_list = [(str(r["Açıklama"]), float(r["Süt Karşılığı (Lt)"])) for _, r in edited_df.iterrows() if pd.notnull(r["Açıklama"])]
+        st.session_state["custom_factory_data"][edit_day] = new_list
+        active_excel_source = default_excel_stream(st.session_state["custom_factory_data"])
     else:
-        active_excel_source = default_excel_stream()
+        active_excel_source = default_excel_stream(st.session_state["custom_factory_data"])
         st.success("✅ Sütaş Karacabey 6 günlük gerçek fabrika projeksiyonu aktif.")
 
     st.markdown("---")
-    st.header("🎛️ 2. Senaryo & Parametre Ayarları")
 
-    st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
+    # YÖNETİCİYE ÖZEL: Senaryo & Parametre Ayarları
+    if st.session_state["is_admin"]:
+        st.header("🎛️ 2. Senaryo & Parametre Ayarları (Yönetici)")
+        st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
 
-    with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
-        sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, step=0.5, key="p6_debi")
-        sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, step=0.25, key="kultur_suresi")
-        sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, step=0.5, key="max_kultur_bekleme")
-        sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, step=10.0, key="p6_cip_limit")
-        sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="p6_cip_suresi")
+        with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
+            sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, step=0.5, key="p6_debi")
+            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, step=0.25, key="kultur_suresi")
+            sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, step=0.5, key="max_kultur_bekleme")
+            sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, step=10.0, key="p6_cip_limit")
+            sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="p6_cip_suresi")
 
-    with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
-        sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, step=1.0, key="mesai_saati")
-        sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="tank_cip_suresi")
-        sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, step=0.5, key="makine_max_calisma")
+        with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
+            sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, step=1.0, key="mesai_saati")
+            sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="tank_cip_suresi")
+            sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, step=0.5, key="makine_max_calisma")
 
-    with st.expander("💰 Finansal Parametreler", expanded=False):
-        sim_birim_fiyat = st.number_input(
-            "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
-            min_value=20.0,
-            max_value=200.0,
-            step=5.0,
-            key="birim_fiyat",
-            help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
-        )
+        with st.expander("💰 Finansal Parametreler", expanded=False):
+            sim_birim_fiyat = st.number_input(
+                "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
+                min_value=20.0,
+                max_value=200.0,
+                step=5.0,
+                key="birim_fiyat",
+                help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
+            )
 
-    st.markdown("---")
-    st.header("⚙️ 3. Gelişmiş DSS Modülleri")
+        with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
+            sim_opt_mode = st.radio(
+                "Algoritma Hedefi:",
+                ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
+            )
+        st.markdown("---")
+    else:
+        # Normal Kullanıcı için Varsayılan Parametreler Sabittir
+        sim_p6_debi = DEFAULT_PARAMS["p6_debi"]
+        sim_kultur_suresi = DEFAULT_PARAMS["kultur_suresi"]
+        sim_max_kultur_bekleme = DEFAULT_PARAMS["max_kultur_bekleme"]
+        sim_p6_cip_limit = DEFAULT_PARAMS["p6_cip_limit"]
+        sim_p6_cip_suresi = DEFAULT_PARAMS["p6_cip_suresi"]
+        sim_mesai_saati = DEFAULT_PARAMS["mesai_saati"]
+        sim_tank_cip_suresi = DEFAULT_PARAMS["tank_cip_suresi"]
+        sim_makine_max_calisma = DEFAULT_PARAMS["makine_max_calisma"]
+        sim_birim_fiyat = DEFAULT_PARAMS["birim_fiyat"]
+        sim_opt_mode = "Sezgisel JIT (Mevcut)"
 
-    with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
-        sim_opt_mode = st.radio(
-            "Algoritma Hedefi:",
-            ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
-        )
-
+    # HERKESE AÇIK: Dinamik Arıza Simülasyonu
+    st.header("⚙️ Dinamik Simülasyon & Arıza")
     with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=True):
         sim_ariza_aktif = st.toggle("🚨 Arıza Simülasyonunu Devreye Al", value=False)
         if sim_ariza_aktif:
@@ -1527,8 +1583,8 @@ with st.sidebar:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
     st.markdown("---")
-    st.header("🔒 4. Sabit Tesis & Fiziksel Kısıtlar")
-
+    # HERKESE AÇIK: Değişmeyen Sabit Tesis Kısıtları
+    st.header("🔒 Sabit Tesis & Fiziksel Kısıtlar")
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
         * **T43:** 38.0 Ton
@@ -1614,15 +1670,17 @@ if st.session_state["results"] is not None:
     )
     st.markdown("---")
 
+    # TAB YAPILANDIRMASI (YÖNETİCİYE ÖZEL TABLAR FİLTRELENİR)
     tab_options = [
         "📊 Yönetici Özeti",
         "⚖️ Senaryo Kıyaslama (What-If)",
         "🔍 Denetim Logu",
-        "📈 Darboğaz & Kapasite",
-        "👥 İşgücü Analizi",
-        "📊 Gantt Şeması",
-        "📅 Günlük Çizelgeler",
     ]
+    if st.session_state["is_admin"]:
+        tab_options.extend(["📈 Darboğaz & Kapasite", "👥 İşgücü Analizi"])
+
+    tab_options.extend(["📊 Gantt Şeması", "📅 Günlük Çizelgeler"])
+
     current_tab = st.radio("Görünüm Seçin:", tab_options, horizontal=True, key="selected_tab", label_visibility="collapsed")
 
     if current_tab == "📊 Yönetici Özeti":
@@ -1688,12 +1746,12 @@ if st.session_state["results"] is not None:
         st.subheader("P6 ve Tank Geçişleri Denetim Günlüğü")
         st.dataframe(results["df_audit"], use_container_width=True)
 
-    elif current_tab == "📈 Darboğaz & Kapasite":
+    elif current_tab == "📈 Darboğaz & Kapasite" and st.session_state["is_admin"]:
         st.subheader("Sistem Darboğazları & Kapasite Doluluk Oranları")
         st.pyplot(results["fig_db1"])
         st.pyplot(results["fig_hm"])
 
-    elif current_tab == "👥 İşgücü Analizi":
+    elif current_tab == "👥 İşgücü Analizi" and st.session_state["is_admin"]:
         st.subheader("İşgücü İhtiyacı Seviyelendirme Analizi")
         isgucu_secenekleri = ["📊 Haftalık Genel Ortalama"] + list(results["gunluk_saatlik_isgucu"].keys())
         secilen_isgucu_gorunumu = st.selectbox("İşgücü Görünümü Seçin:", isgucu_secenekleri)
