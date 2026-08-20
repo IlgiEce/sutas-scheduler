@@ -19,14 +19,14 @@ import re
 # GELİŞTİRİCİ & TELİF TANIMLARI
 # ==============================================================================
 DEVELOPER_NAME = "İlgi Ece Çakmak"
-SUTAS_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png"
+SUTAS_LOGO_URL = "https://raw.githubusercontent.com/zahidgurbuz/sutas/main/sutas_logo.png"
 
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
 # ==============================================================================
 st.set_page_config(
     page_title="Sütaş Karacabey Master Scheduler & DSS",
-    page_icon=SUTAS_LOGO_URL,
+    page_icon="🥛",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -56,12 +56,8 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    col_log1, col_log2 = st.columns([1, 4])
-    with col_log1:
-        st.image(SUTAS_LOGO_URL, width=130)
-    with col_log2:
-        st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
-        st.caption(f"🚀 Developer: **{DEVELOPER_NAME}**")
+    st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
+    st.caption(f"🚀 Developer: **{DEVELOPER_NAME}**")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -125,7 +121,7 @@ if st.session_state["auth_user"] is None:
             st.session_state["admin_login_mode"] = False
             st.rerun()
 
-    st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
+    st.stop()
 
 # ==============================================================================
 # MEVCUT UYGULAMA TANIMLARI
@@ -1504,19 +1500,12 @@ def varsayilana_sifirla():
 
 
 # ------------------------------------------------------------------------------
-# SAYFA ÜSTÜ: LOGO & TELİF ROZETİ
+# SAYFA ÜSTÜ: TELİF ROZETİ
 # ------------------------------------------------------------------------------
-col_head1, col_head2 = st.columns([1, 5])
-with col_head1:
-    st.image(SUTAS_LOGO_URL, width=140)
-with col_head2:
-    st.title("Sütaş Karacabey Master Scheduler & DSS")
-    st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
+st.title("Sütaş Karacabey Master Scheduler & DSS")
+st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
 
 with st.sidebar:
-    # Sidebar En Üst Logo
-    st.image(SUTAS_LOGO_URL, width=130)
-    
     # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
     if st.session_state["is_admin"]:
         st.success(f"👑 **Yönetici Modu Açık**")
@@ -2003,7 +1992,7 @@ if st.session_state["results"] is not None:
         else:
             st.info("Gantt şeması oluşturmak için lütfen sol menüden simülasyonu çalıştırın.")
 
-   elif current_tab == "📅 Günlük Çizelgeler":
+    elif current_tab == "📅 Günlük Çizelgeler":
         st.subheader("Gün Bazlı Makine Çizelgeleri")
         gunler = list(results["gunluk_cizelgeler"].keys())
         selected_day = st.selectbox("Görüntülenecek Günü Seçin", gunler, key="day_selector")
@@ -2029,6 +2018,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-elif active_excel_source is None:
-    st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
