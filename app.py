@@ -39,7 +39,8 @@ if st.session_state["auth_user"] is None:
         if submit_btn:
             if user_name.strip():
                 st.session_state["auth_user"] = user_name.strip()
-                log_time = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+                log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
                 
                 # 1. Yerel Log Dosyasına Kayıt
                 try:
