@@ -25,27 +25,54 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI GİRİŞ VE GOOGLE SHEETS / LOG KAYDI
 # ==============================================================================
+import re
+
+def isim_gecerli_mi(isim: str) -> bool:
+    isim = isim.strip()
+    
+    # 1. Sadece Türkçe/İngilizce harfler ve boşluk kabul et (Rakam, sembol, * yasak)
+    if not re.fullmatch(r"^[a-zA-ZçÇğĞıİöÖşŞüÜ\s]+$", isim):
+        return False
+    
+    # 2. En az 2 kelime olmalı (Ad ve Soyad)
+    kelimeler = isim.split()
+    if len(kelimeler) < 2:
+        return False
+    
+    # 3. Her kelime en az 2 harften oluşmalı ('a', 'x' gibi tek harfleri engeller)
+    if any(len(k) < 2 for k in kelimeler):
+        return False
+        
+    return True
+
+
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
 
 if st.session_state["auth_user"] is None:
     st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
-    st.info("Sisteme erişebilmek için lütfen adınızı belirtiniz.")
+    st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
     
     with st.form("login_form"):
         user_name = st.text_input("Ad Soyad:")
         submit_btn = st.form_submit_button("Sisteme Giriş Yap")
         
         if submit_btn:
-            if user_name.strip():
-                st.session_state["auth_user"] = user_name.strip()
+            temiz_isim = user_name.strip()
+            
+            if not isim_gecerli_mi(temiz_isim):
+                st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol, rakam veya tek harf kullanılamaz).")
+            else:
+                st.session_state["auth_user"] = temiz_isim.title()
+                
+                # Türkiye Saati (UTC+3)
                 turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
                 log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
                 
                 # 1. Yerel Log Dosyasına Kayıt
                 try:
                     with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
-                        f.write(f"Zaman: {log_time} | Kullanıcı: {user_name.strip()}\n")
+                        f.write(f"Zaman: {log_time} | Kullanıcı: {temiz_isim.title()}\n")
                 except Exception:
                     pass
                 
@@ -64,7 +91,7 @@ if st.session_state["auth_user"] is None:
                     # Boş satırları temizle
                     df_log = df_log.dropna(how="all")
                     
-                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": user_name.strip()}])
+                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": temiz_isim.title()}])
                     df_updated = pd.concat([df_log, new_row], ignore_index=True)
                     
                     conn.update(data=df_updated)
@@ -72,8 +99,6 @@ if st.session_state["auth_user"] is None:
                     pass
                 
                 st.rerun()
-            else:
-                st.error("Lütfen adınızı giriniz.")
     st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
 
 # Giriş yapan kullanıcı bilgisi
