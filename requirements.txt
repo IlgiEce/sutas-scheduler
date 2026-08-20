@@ -4,3 +4,5 @@ matplotlib
 seaborn
 streamlit
 numpy
+st-gsheets-connection
+
