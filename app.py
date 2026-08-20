@@ -11,6 +11,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
 import re
 
 # ==============================================================================
@@ -68,14 +70,7 @@ if st.session_state["auth_user"] is None:
                     turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
                     log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
                     
-                    # 1. Yerel Log Dosyasına Kayıt
-                    try:
-                        with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
-                            f.write(f"Zaman: {log_time} | Kullanıcı: {temiz_isim.title()}\n")
-                    except Exception:
-                        pass
-                    
-                    # 2. Google Sheets Bağlantısı
+                    # Google Sheets Bağlantısı
                     try:
                         from streamlit_gsheets import GSheetsConnection
                         conn = st.connection("gsheets", type=GSheetsConnection)
@@ -122,13 +117,12 @@ if st.session_state["auth_user"] is None:
     st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
 
 # ==============================================================================
-# MEVCUT UYGULAMA KODLARINIZ
+# MEVCUT UYGULAMA TANIMLARI
 # ==============================================================================
 plt.rcParams["font.sans-serif"] = "DejaVu Sans"
 plt.rcParams["axes.edgecolor"] = "#D9D9D9"
 plt.rcParams["axes.linewidth"] = 0.8
 
-# Sabit Tesis Tanımları
 MIN_SUT_LIMITI_TON = 0.01
 MAKINE_LISTESI = ["Küçük Kova", "Büyük Kova", "132 çap", "160 çap", "Grunwald"]
 
@@ -1176,7 +1170,9 @@ def run_scheduler_pipeline(
 
     df_kpi = pd.DataFrame(kpi_rows)
 
-    # Excel Çıktısı Hazırlığı
+    # --------------------------------------------------------------------------
+    # EXCEL ÇIKTISI HAZIRLIĞI (GİRİŞ VERİSİ SAYFASI DAHİL)
+    # --------------------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     thin_border = Border(
@@ -1186,6 +1182,29 @@ def run_scheduler_pipeline(
         bottom=Side(style="thin", color="D9D9D9"),
     )
 
+    # 1. Ham Sipariş Projeksiyonu Sayfası
+    ws_inputs = wb.create_sheet(title="📥 HAM SİPARİŞ PROJEKSİYONU")
+    ws_inputs.views.sheetView[0].showGridLines = True
+    ws_inputs.append(["Gün", "Ürün Açıklaması", "Süt Karşılığı (Lt)", "Tonaj (Ton)"])
+    for col_i in range(1, 5):
+        cell_h = ws_inputs.cell(row=1, column=col_i)
+        cell_h.font = Font(bold=True, color="FFFFFF")
+        cell_h.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
+        cell_h.alignment = Alignment(horizontal="center", vertical="center")
+
+    curr_r = 2
+    for sheet_n in xls.sheet_names:
+        day_orders = dinamik_projeksiyon_oku(excel_source, sheet_n)
+        for ord_item in day_orders:
+            ws_inputs.append([sheet_n, ord_item["ürün_adı"], ord_item["tonaj_ton"] * 1000.0, ord_item["tonaj_ton"]])
+            curr_r += 1
+
+    ws_inputs.column_dimensions["A"].width = 16
+    ws_inputs.column_dimensions["B"].width = 38
+    ws_inputs.column_dimensions["C"].width = 22
+    ws_inputs.column_dimensions["D"].width = 16
+
+    # 2. KPI Sayfası
     ws_kpi = wb.create_sheet(title="📊 YÖNETİCİ ÖZETİ (KPI)")
     ws_kpi.views.sheetView[0].showGridLines = True
     ws_kpi.merge_cells("A1:I2")
@@ -1253,7 +1272,7 @@ def run_scheduler_pipeline(
     img_kpi.height = 360
     ws_kpi.add_image(img_kpi, f"A{r_graph_start}")
 
-    # Denetim Logu (Audit) Sayfası
+    # 3. Denetim Logu (Audit) Sayfası
     ws_audit = wb.create_sheet(title="🔍 TANK & P6 HAZIRLIK LOGU")
     ws_audit.views.sheetView[0].showGridLines = True
     ws_audit.merge_cells("A1:K2")
@@ -1338,7 +1357,7 @@ def run_scheduler_pipeline(
         spine.set_visible(False)
     plt.tight_layout()
 
-    # Günlük Sayfalar
+    # 4. Günlük Sayfalar
     header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     unfulfilled_header_fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
     cip_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
@@ -1477,9 +1496,7 @@ st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
-    # --------------------------------------------------------------------------
     # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
-    # --------------------------------------------------------------------------
     if st.session_state["is_admin"]:
         st.success(f"👑 **Yönetici Modu Açık**")
         if st.button("🔄 Normal Kullanıcı Moduna Dön", use_container_width=True):
@@ -1789,7 +1806,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['kultur_suresi']:.2f} Sa"},
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
             {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
             {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
         ]
@@ -1865,13 +1882,16 @@ if st.session_state["results"] is not None:
         plt.tight_layout()
         st.pyplot(fig_dinamik_ig)
 
+    # --------------------------------------------------------------------------
+    # İNTERAKTİF GANTT ŞEMASI (PLOTLY)
+    # --------------------------------------------------------------------------
     elif current_tab == "📊 Gantt Şeması":
-        st.subheader("Tesis İçi Günlük Üretim & Zaman Çizelgesi (Gantt)")
+        st.subheader("Tesis İçi Günlük Üretim & Zaman Çizelgesi (İnteraktif Gantt)")
         df_gantt_all = pd.DataFrame(results["all_schedule_rows"])
         if not df_gantt_all.empty:
             gun_isimleri_gantt = list(dict.fromkeys(df_gantt_all["gun_adi"].tolist()))
             secilen_gantt_gun = st.selectbox("Gantt Şemasını Görüntülemek İstediğiniz Günü Seçin:", gun_isimleri_gantt, key="gantt_day_sel")
-            df_gantt_filtered = df_gantt_all[df_gantt_all["gun_adi"] == secilen_gantt_gun]
+            df_gantt_filtered = df_gantt_all[df_gantt_all["gun_adi"] == secilen_gantt_gun].copy()
 
             g_tonaj = df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum()
             g_parti = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"])
@@ -1883,77 +1903,55 @@ if st.session_state["results"] is not None:
             cg3.metric("Aktif Çalışan Hat Sayısı", f"{df_gantt_filtered['Makine'].nunique()} Hat")
             cg4.metric("Duruş / Arıza Durumu", f"{'1 Kesinti ⚠️' if g_ariza > 0 else 'Kesintisiz 🟢'}")
 
-            fig_gantt_dyn, ax_gd = plt.subplots(figsize=(14, 5.2), dpi=200)
-            fig_gantt_dyn.patch.set_facecolor("#FAFAFC")
-            ax_gd.set_facecolor("#FFFFFF")
-
-            m_map = {m: i for i, m in enumerate(MAKINE_LISTESI)}
-            for i in range(len(MAKINE_LISTESI)):
-                if i % 2 == 0:
-                    ax_gd.axhspan(i - 0.45, i + 0.45, color="#F4F6F9", zorder=0)
-
-            palette = {
-                "TAM YAĞLI": {"fill": "#1F4E78", "edge": "#14324E"},
-                "YARIM YAĞLI": {"fill": "#2E75B6", "edge": "#1F4E78"},
-                "%5 YAĞLI": {"fill": "#548235", "edge": "#385723"},
-                "PAKSÜT": {"fill": "#C55A11", "edge": "#833C0C"},
-                "DURUŞ": {"fill": "#C00000", "edge": "#7C0000"},
+            # Plotly İnteraktif Timeline
+            color_map = {
+                "TAM YAĞLI": "#1F4E78",
+                "YARIM YAĞLI": "#2E75B6",
+                "%5 YAĞLI": "#548235",
+                "PAKSÜT": "#C55A11",
+                "DURUŞ": "#C00000",
             }
 
-            g_start_min = df_gantt_filtered["dt_start"].min()
-            g_end_max = g_start_min + datetime.timedelta(hours=results["mesai_h"])
+            fig_plotly = px.timeline(
+                df_gantt_filtered,
+                x_start="dt_start",
+                x_end="dt_end",
+                y="Makine",
+                color="Süt Tipi",
+                color_discrete_map=color_map,
+                category_orders={"Makine": MAKINE_LISTESI},
+                hover_data={
+                    "Sipariş ID": True,
+                    "Ürün Adı": True,
+                    "Miktar (Ton)": True,
+                    "Tahsis Tank": True,
+                    "Kalıp/Gramaj": True,
+                    "Hız (T/Sa)": True,
+                    "Kültür & CIP Hijyen Notu": True,
+                    "dt_start": False,
+                    "dt_end": False,
+                },
+                title=f"🏭 {secilen_gantt_gun} Günü İnteraktif Üretim Akışı (Mouse ile üzerine gelin, yakınlaştırın)",
+            )
 
-            for _, row in df_gantt_filtered.iterrows():
-                m_name = row["Makine"]
-                if m_name in m_map:
-                    y = m_map[m_name]
-                    s_num = mdates.date2num(row["dt_start"])
-                    e_num = mdates.date2num(row["dt_end"])
-                    dur = e_num - s_num
-                    st_val = row["Süt Tipi"]
-                    col_info = palette.get(st_val, {"fill": "#595959", "edge": "#262626"})
+            fig_plotly.update_yaxes(autorange="reversed")
+            fig_plotly.update_layout(
+                xaxis=dict(
+                    title="Vardiya Saatleri",
+                    tickformat="%H:%M",
+                    dtick=3600000,  # Saatlik aralık
+                    showgrid=True,
+                    gridcolor="#E0E4E8",
+                ),
+                yaxis=dict(title="Makineler", showgrid=True, gridcolor="#F0F2F6"),
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FAFAFC",
+                height=450,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                margin=dict(l=40, r=40, t=60, b=40),
+            )
 
-                    rect = patches.FancyBboxPatch(
-                        (s_num, y - 0.28), dur, 0.56,
-                        boxstyle="round,pad=0.01,rounding_size=0.03",
-                        facecolor=col_info["fill"],
-                        edgecolor=col_info["edge"],
-                        linewidth=1.2,
-                        zorder=3
-                    )
-                    ax_gd.add_patch(rect)
-
-                    if (row["dt_end"] - row["dt_start"]).total_seconds() >= 2400:
-                        mid_x = s_num + dur / 2
-                        lbl = f"{row['Sipariş ID']}\n{row['Miktar (Ton)']}T" if row["Miktar (Ton)"] > 0 else "ARIZA\nKESİNTİSİ"
-                        ax_gd.text(mid_x, y, lbl, ha="center", va="center", color="white", fontsize=8, fontweight="bold", zorder=4)
-
-            ax_gd.set_yticks(range(len(MAKINE_LISTESI)))
-            ax_gd.set_yticklabels(MAKINE_LISTESI, fontsize=10, fontweight="bold", color="#1F4E78")
-            ax_gd.invert_yaxis()
-            ax_gd.set_xlim(mdates.date2num(g_start_min), mdates.date2num(g_end_max))
-            ax_gd.xaxis.set_major_locator(mdates.HourLocator(interval=1))
-            ax_gd.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
-            plt.setp(ax_gd.get_xticklabels(), rotation=0, fontsize=8.5, fontweight="bold", color="#333333")
-
-            shift_time = g_start_min + datetime.timedelta(hours=10)
-            ax_gd.axvline(mdates.date2num(shift_time), color="#C00000", linestyle="--", linewidth=1.5, zorder=2)
-            ax_gd.grid(axis="x", color="#E0E4E8", linestyle=":", linewidth=1, zorder=1)
-            ax_gd.set_xlabel("Vardiya Saatleri (08:00 Başlangıçlı 20 Saatlik Üretim Penceresi)", fontsize=10, fontweight="bold", color="#1F4E78", labelpad=10)
-            ax_gd.set_title(f"🏭 {secilen_gantt_gun} Günü Master Üretim & Çizelgeleme Gantt Şeması", fontsize=12, fontweight="bold", color="#1F4E78", pad=15)
-
-            legend_elements = [
-                patches.Patch(facecolor=v["fill"], edgecolor=v["edge"], label=k) for k, v in palette.items() if k != "DURUŞ"
-            ]
-            legend_elements.append(patches.Patch(facecolor="#C00000", edgecolor="#7C0000", label="DURUŞ / ARIZA"))
-            ax_gd.legend(handles=legend_elements, loc="upper right", bbox_to_anchor=(1, 1.15), ncol=5, frameon=True, facecolor="#FFFFFF", edgecolor="#D9D9D9", fontsize=8.5)
-
-            plt.tight_layout()
-            st.pyplot(fig_gantt_dyn)
-
-            with st.expander(f"📋 {secilen_gantt_gun} Günü Zaman Çizelgesi Akış Tablosu", expanded=False):
-                gantt_table_df = df_gantt_filtered[["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Makine", "Tahsis Tank", "Başlangıç", "Bitiş"]].copy()
-                st.dataframe(gantt_table_df, use_container_width=True)
+            st.plotly_chart(fig_plotly, use_container_width=True)
         else:
             st.info("Gantt şeması oluşturmak için lütfen sol menüden simülasyonu çalıştırın.")
 
