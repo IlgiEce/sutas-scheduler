@@ -19,7 +19,8 @@ import re
 # GELİŞTİRİCİ & TELİF TANIMLARI
 # ==============================================================================
 DEVELOPER_NAME = "İlgi Ece Çakmak"
-SUTAS_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png"
+# Wikimedia hotlink engeline takılmayan doğrudan Sütaş CDN logo URL'si
+SUTAS_LOGO_URL = "https://www.sutas.com.tr/assets/img/logo.png"
 
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
@@ -61,7 +62,6 @@ if st.session_state["auth_user"] is None:
         st.image(SUTAS_LOGO_URL, width=130)
     with col_log2:
         st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
-        st.caption(f"🚀 Developer: **{DEVELOPER_NAME}**")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -125,7 +125,7 @@ if st.session_state["auth_user"] is None:
             st.session_state["admin_login_mode"] = False
             st.rerun()
 
-    st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
+    st.stop()
 
 # ==============================================================================
 # MEVCUT UYGULAMA TANIMLARI
@@ -1504,14 +1504,14 @@ def varsayilana_sifirla():
 
 
 # ------------------------------------------------------------------------------
-# SAYFA ÜSTÜ: LOGO & TELİF ROZETİ
+# SAYFA ÜSTÜ: LOGO & BAŞLIK
 # ------------------------------------------------------------------------------
 col_head1, col_head2 = st.columns([1, 5])
 with col_head1:
     st.image(SUTAS_LOGO_URL, width=140)
 with col_head2:
     st.title("Sütaş Karacabey Master Scheduler & DSS")
-    st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
+    st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
     st.image(SUTAS_LOGO_URL, width=130)
@@ -1695,7 +1695,17 @@ with st.sidebar:
         """)
 
     st.markdown("---")
-    st.caption(f"🛡️ © 2026 Sütaş DSS Platformu\n\n**Developer:** {DEVELOPER_NAME}")
+    st.markdown(
+        f"""
+        <div style="color: #111111; font-weight: bold; font-size: 13px; padding-bottom: 5px;">
+            🛡️ © 2026 Sütaş DSS Platformu
+        </div>
+        <div style="color: #111111; font-weight: bold; font-size: 13px;">
+            Developer: <span style="font-weight: 800;">{DEVELOPER_NAME}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 # ==============================================================================
 # HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
@@ -1798,7 +1808,7 @@ if st.session_state["results"] is not None:
     )
     st.markdown("---")
 
-    # TAB YAPILANDIRMASI (YÖNETİCİYE ÖZEL TABLAR FİLTRELENİR)
+    # TAB YAPILANDIRMASI
     tab_options = ["📊 Yönetici Özeti"]
     
     if st.session_state["is_admin"]:
