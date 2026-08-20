@@ -123,9 +123,9 @@ if st.session_state["auth_user"] is None:
 
 # Sidebar Bilgilendirmesi
 if st.session_state["is_admin"]:
-    st.sidebar.success(f"👑 **Yönetici Girişi:** `{st.session_state['auth_user']}`")
+    st.sidebar.success(f"👑 **Yönetici:** `{st.session_state['auth_user']}`")
 else:
-    st.sidebar.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
+    st.sidebar.markdown(f"👤 **Kullanıcı:** `{st.session_state['auth_user']}`")
 
 # ==============================================================================
 # MEVCUT UYGULAMA KODLARINIZ
@@ -258,17 +258,10 @@ DEFAULT_FACTORY_DATA = {
 }
 
 
-def default_excel_stream(custom_data=None):
-    data_to_use = custom_data if custom_data else DEFAULT_FACTORY_DATA
-    if custom_data is None:
-        for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
-            if os.path.exists(f_name):
-                with open(f_name, "rb") as f:
-                    return io.BytesIO(f.read())
-
+def create_excel_stream_from_dict(factory_dict):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
-    for sheet_name, rows in data_to_use.items():
+    for sheet_name, rows in factory_dict.items():
         ws = wb.create_sheet(title=sheet_name)
         ws.append(["Açıklama", "Süt Karşılığı (Lt)"])
         for row in rows:
@@ -277,6 +270,14 @@ def default_excel_stream(custom_data=None):
     wb.save(buf)
     buf.seek(0)
     return buf
+
+
+def default_excel_stream():
+    for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
+        if os.path.exists(f_name):
+            with open(f_name, "rb") as f:
+                return io.BytesIO(f.read())
+    return create_excel_stream_from_dict(DEFAULT_FACTORY_DATA)
 
 
 def hiz_matrisini_yukle():
@@ -1468,13 +1469,13 @@ if "selected_tab" not in st.session_state:
     st.session_state["selected_tab"] = "📊 Yönetici Özeti"
 
 if "custom_factory_data" not in st.session_state:
-    st.session_state["custom_factory_data"] = None
+    st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
 
 
 def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
-    st.session_state["custom_factory_data"] = None
+    st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
     st.rerun()
 
 
@@ -1495,20 +1496,33 @@ with st.sidebar:
         if uploaded_file is not None:
             active_excel_source = uploaded_file
     elif veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
-        st.info("Aşağıdaki sekmeden seçilen günün sipariş tonajlarını doğrudan düzenleyebilirsiniz.")
-        edit_day = st.selectbox("Düzenlenecek Gün:", list(DEFAULT_FACTORY_DATA.keys()))
-        if st.session_state["custom_factory_data"] is None:
-            st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
+        st.info("💡 Siparişleri ekleyip silebilir veya tonajlarını değiştirebilirsiniz. Değişiklikler otomatik olarak üretim planına yansır.")
+        edit_day = st.selectbox("Düzenlenecek Gün:", list(st.session_state["custom_factory_data"].keys()))
         
+        # Güncel günün verisi
         cur_day_data = pd.DataFrame(st.session_state["custom_factory_data"][edit_day], columns=["Açıklama", "Süt Karşılığı (Lt)"])
-        edited_df = st.data_editor(cur_day_data, use_container_width=True, num_rows="dynamic")
         
-        # Güncellenen veriyi sakla
-        new_list = [(str(r["Açıklama"]), float(r["Süt Karşılığı (Lt)"])) for _, r in edited_df.iterrows() if pd.notnull(r["Açıklama"])]
+        edited_df = st.data_editor(
+            cur_day_data,
+            use_container_width=True,
+            num_rows="dynamic",
+            key=f"editor_{edit_day}",
+            column_config={
+                "Açıklama": st.column_config.TextColumn("Ürün Açıklaması", required=True),
+                "Süt Karşılığı (Lt)": st.column_config.NumberColumn("Süt Karşılığı (Lt)", min_value=0.0, step=100.0, required=True),
+            }
+        )
+        
+        # Yeni güncellenen listeyi kaydet
+        new_list = [
+            (str(r["Açıklama"]).strip(), float(r["Süt Karşılığı (Lt)"]))
+            for _, r in edited_df.iterrows()
+            if pd.notnull(r["Açıklama"]) and str(r["Açıklama"]).strip() != "" and pd.notnull(r["Süt Karşılığı (Lt)"])
+        ]
         st.session_state["custom_factory_data"][edit_day] = new_list
-        active_excel_source = default_excel_stream(st.session_state["custom_factory_data"])
+        active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
     else:
-        active_excel_source = default_excel_stream(st.session_state["custom_factory_data"])
+        active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
         st.success("✅ Sütaş Karacabey 6 günlük gerçek fabrika projeksiyonu aktif.")
 
     st.markdown("---")
@@ -1626,6 +1640,19 @@ with st.sidebar:
         * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
         """)
 
+    # NORMAL KULLANICILAR İÇİN YÖNETİCİYE GEÇİŞ PATH'İ
+    if not st.session_state["is_admin"]:
+        st.markdown("---")
+        with st.expander("🔑 Yönetici Girişi Yap"):
+            elevate_pin = st.text_input("4 Haneli Kod:", type="password", max_chars=4, key="elevate_pin_input")
+            if st.button("Yetkiyi Yükselt", key="btn_elevate"):
+                if elevate_pin == ADMIN_PIN:
+                    st.session_state["is_admin"] = True
+                    st.session_state["auth_user"] = "Sistem Yöneticisi"
+                    st.rerun()
+                else:
+                    st.error("Hatalı kod!")
+
 if "results" not in st.session_state:
     st.session_state["results"] = None
 
@@ -1671,11 +1698,13 @@ if st.session_state["results"] is not None:
     st.markdown("---")
 
     # TAB YAPILANDIRMASI (YÖNETİCİYE ÖZEL TABLAR FİLTRELENİR)
-    tab_options = [
-        "📊 Yönetici Özeti",
-        "⚖️ Senaryo Kıyaslama (What-If)",
-        "🔍 Denetim Logu",
-    ]
+    tab_options = ["📊 Yönetici Özeti"]
+    
+    if st.session_state["is_admin"]:
+        tab_options.append("⚖️ Senaryo Kıyaslama (What-If)")
+
+    tab_options.append("🔍 Denetim Logu")
+
     if st.session_state["is_admin"]:
         tab_options.extend(["📈 Darboğaz & Kapasite", "👥 İşgücü Analizi"])
 
@@ -1692,7 +1721,7 @@ if st.session_state["results"] is not None:
         st.dataframe(results["df_kpi"], use_container_width=True)
         st.pyplot(results["fig_kpi"])
 
-    elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)":
+    elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)" and st.session_state["is_admin"]:
         st.subheader("⚖️ Stratejik Senaryo Kıyaslama ve Yatırım Analizi")
         st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
         with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
