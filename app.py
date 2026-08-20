@@ -1538,28 +1538,29 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # YÖNETİCİYE ÖZEL: Senaryo & Parametre Ayarları
+    # 2. SENARYO & PARAMETRE AYARLARI (HERKESE GÖRÜNÜR - YÖNETİCİ DÜZENLER, KULLANICI OKUR)
     if st.session_state["is_admin"]:
-        st.header("🎛️ 2. Senaryo & Parametre Ayarları (Yönetici)")
+        st.header("🎛️ 2. Senaryo & Parametre Ayarları ✏️")
         st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
 
         with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
-            sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, step=0.5, key="p6_debi")
-            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, step=0.25, key="kultur_suresi")
-            sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, step=0.5, key="max_kultur_bekleme")
-            sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, step=10.0, key="p6_cip_limit")
-            sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="p6_cip_suresi")
+            sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, value=float(st.session_state.get("p6_debi", DEFAULT_PARAMS["p6_debi"])), step=0.5, key="p6_debi")
+            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
+            sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", DEFAULT_PARAMS["max_kultur_bekleme"])), step=0.5, key="max_kultur_bekleme")
+            sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
+            sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
 
         with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
-            sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, step=1.0, key="mesai_saati")
-            sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, step=0.25, key="tank_cip_suresi")
-            sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, step=0.5, key="makine_max_calisma")
+            sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, value=float(st.session_state.get("mesai_saati", DEFAULT_PARAMS["mesai_saati"])), step=1.0, key="mesai_saati")
+            sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("tank_cip_suresi", DEFAULT_PARAMS["tank_cip_suresi"])), step=0.25, key="tank_cip_suresi")
+            sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, value=float(st.session_state.get("makine_max_calisma", DEFAULT_PARAMS["makine_max_calisma"])), step=0.5, key="makine_max_calisma")
 
         with st.expander("💰 Finansal Parametreler", expanded=False):
             sim_birim_fiyat = st.number_input(
                 "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
                 min_value=20.0,
                 max_value=200.0,
+                value=float(st.session_state.get("birim_fiyat", DEFAULT_PARAMS["birim_fiyat"])),
                 step=5.0,
                 key="birim_fiyat",
                 help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
@@ -1570,9 +1571,9 @@ with st.sidebar:
                 "Algoritma Hedefi:",
                 ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
             )
-        st.markdown("---")
     else:
-        # Normal Kullanıcı için Varsayılan Parametreler Sabittir
+        # NORMAL KULLANICIDA KISITLAR DEĞİŞTİRİLEMEZ AMA ŞEFFAF OLARAK GÖRÜNÜR
+        st.header("🎛️ 2. Aktif Fabrika Parametreleri 🔒")
         sim_p6_debi = DEFAULT_PARAMS["p6_debi"]
         sim_kultur_suresi = DEFAULT_PARAMS["kultur_suresi"]
         sim_max_kultur_bekleme = DEFAULT_PARAMS["max_kultur_bekleme"]
@@ -1583,6 +1584,30 @@ with st.sidebar:
         sim_makine_max_calisma = DEFAULT_PARAMS["makine_max_calisma"]
         sim_birim_fiyat = DEFAULT_PARAMS["birim_fiyat"]
         sim_opt_mode = "Sezgisel JIT (Mevcut)"
+
+        with st.expander("⚡ Pastörizatör (P6) & Mayalama (Sabit)", expanded=False):
+            st.markdown(f"""
+            * **P6 Debi Hızı:** `{sim_p6_debi} Ton/Saat`
+            * **Mayalama (Kültür) Süresi:** `{sim_kultur_suresi} Saat`
+            * **Maks. Mayalı Bekleme Limiti:** `{sim_max_kultur_bekleme} Saat`
+            * **P6 CIP Yıkama Limiti:** `{int(sim_p6_cip_limit)} Ton`
+            * **P6 CIP Yıkama Süresi:** `{sim_p6_cip_suresi} Saat`
+            """)
+
+        with st.expander("⏱️ Vardiya & Hijyen Süreleri (Sabit)", expanded=False):
+            st.markdown(f"""
+            * **Günlük Mesai Penceresi:** `{int(sim_mesai_saati)} Saat (08:00 - 04:00)`
+            * **Tank CIP Süresi:** `{sim_tank_cip_suresi} Saat`
+            * **Maks. Ardışık Makine Çalışması:** `{sim_makine_max_calisma} Saat`
+            """)
+
+        with st.expander("💰 Finansal Parametreler & Algoritma", expanded=False):
+            st.markdown(f"""
+            * **Birim Yoğurt Satış Fiyatı:** `{sim_birim_fiyat} ₺/kg`
+            * **Optimizasyon Yöntemi:** `{sim_opt_mode}`
+            """)
+
+    st.markdown("---")
 
     # HERKESE AÇIK: Dinamik Arıza Simülasyonu
     st.header("⚙️ Dinamik Simülasyon & Arıza")
@@ -1806,7 +1831,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['kultur_suresi']:.2f} Sa"},
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
             {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
             {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
         ]
@@ -1903,7 +1928,6 @@ if st.session_state["results"] is not None:
             cg3.metric("Aktif Çalışan Hat Sayısı", f"{df_gantt_filtered['Makine'].nunique()} Hat")
             cg4.metric("Duruş / Arıza Durumu", f"{'1 Kesinti ⚠️' if g_ariza > 0 else 'Kesintisiz 🟢'}")
 
-            # Plotly İnteraktif Timeline
             color_map = {
                 "TAM YAĞLI": "#1F4E78",
                 "YARIM YAĞLI": "#2E75B6",
@@ -1939,7 +1963,7 @@ if st.session_state["results"] is not None:
                 xaxis=dict(
                     title="Vardiya Saatleri",
                     tickformat="%H:%M",
-                    dtick=3600000,  # Saatlik aralık
+                    dtick=3600000,
                     showgrid=True,
                     gridcolor="#E0E4E8",
                 ),
