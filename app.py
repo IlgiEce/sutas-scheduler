@@ -16,18 +16,16 @@ import plotly.graph_objects as go
 import re
 
 # ==============================================================================
-# GELİŞTİRİCİ & TELİF TANIMLARI
+# GELİŞTİRİCİ TANIMLARI
 # ==============================================================================
 DEVELOPER_NAME = "İlgi Ece Çakmak"
-# Wikimedia hotlink engeline takılmayan doğrudan Sütaş CDN logo URL'si
-SUTAS_LOGO_URL = "https://www.sutas.com.tr/assets/img/logo.png"
 
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
 # ==============================================================================
 st.set_page_config(
     page_title="Sütaş Karacabey Master Scheduler & DSS",
-    page_icon=SUTAS_LOGO_URL,
+    page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -35,7 +33,7 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-ADMIN_PIN = "1661"  # 4 Haneli Yönetici Şifresi
+ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -57,11 +55,7 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    col_log1, col_log2 = st.columns([1, 4])
-    with col_log1:
-        st.image(SUTAS_LOGO_URL, width=130)
-    with col_log2:
-        st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
+    st.markdown("## 🏭 Sütaş Karacabey Master Scheduler & DSS")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -255,6 +249,9 @@ DEFAULT_FACTORY_DATA = {
         ("KAYMAKSIZ YĞR 10 KG ED", 4625.0),
     ],
 }
+
+# Açılır listede sunulacak ürün katalog listesi
+URUN_KATALOGU = sorted(list({p[0] for day_rows in DEFAULT_FACTORY_DATA.values() for p in day_rows}))
 
 
 def create_excel_stream_from_dict(factory_dict):
@@ -1482,7 +1479,6 @@ DEFAULT_PARAMS = {
     "mesai_saati": 20.0,
     "tank_cip_suresi": 1.0,
     "makine_max_calisma": 8.5,
-    "birim_fiyat": 65.0,
 }
 
 for k, v in DEFAULT_PARAMS.items():
@@ -1504,17 +1500,13 @@ def varsayilana_sifirla():
 
 
 # ------------------------------------------------------------------------------
-# SAYFA ÜSTÜ: LOGO & BAŞLIK
+# SAYFA ÜSTÜ: BAŞLIK
 # ------------------------------------------------------------------------------
-col_head1, col_head2 = st.columns([1, 5])
-with col_head1:
-    st.image(SUTAS_LOGO_URL, width=140)
-with col_head2:
-    st.title("Sütaş Karacabey Master Scheduler & DSS")
-    st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
+st.title("🏭 Sütaş Karacabey Master Scheduler & DSS")
+st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
-    st.image(SUTAS_LOGO_URL, width=130)
+    st.markdown("## 🏭 Fabrika Kontrol Paneli")
     
     if st.session_state["is_admin"]:
         st.success("👑 **Yönetici Modu Açık**")
@@ -1574,17 +1566,6 @@ with st.sidebar:
             sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("tank_cip_suresi", DEFAULT_PARAMS["tank_cip_suresi"])), step=0.25, key="tank_cip_suresi")
             sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, value=float(st.session_state.get("makine_max_calisma", DEFAULT_PARAMS["makine_max_calisma"])), step=0.5, key="makine_max_calisma")
 
-        with st.expander("💰 Finansal Parametreler", expanded=False):
-            sim_birim_fiyat = st.number_input(
-                "Ortalama Mamul Yoğurt Satış Fiyatı (₺ / kg)",
-                min_value=20.0,
-                max_value=200.0,
-                value=float(st.session_state.get("birim_fiyat", DEFAULT_PARAMS["birim_fiyat"])),
-                step=5.0,
-                key="birim_fiyat",
-                help="Darboğaz kaynaklı sipariş karşılama ve ciro kaybı hesabında kullanılır.",
-            )
-
         with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
             sim_opt_mode = st.radio(
                 "Algoritma Hedefi:",
@@ -1600,7 +1581,6 @@ with st.sidebar:
         sim_mesai_saati = DEFAULT_PARAMS["mesai_saati"]
         sim_tank_cip_suresi = DEFAULT_PARAMS["tank_cip_suresi"]
         sim_makine_max_calisma = DEFAULT_PARAMS["makine_max_calisma"]
-        sim_birim_fiyat = DEFAULT_PARAMS["birim_fiyat"]
         sim_opt_mode = "Sezgisel JIT (Mevcut)"
 
         with st.expander("⚡ Pastörizatör (P6) & Mayalama (Sabit)", expanded=False):
@@ -1619,9 +1599,8 @@ with st.sidebar:
             * **Maks. Ardışık Makine Çalışması:** `{sim_makine_max_calisma} Saat`
             """)
 
-        with st.expander("💰 Finansal Parametreler & Algoritma", expanded=False):
+        with st.expander("🤖 Çizelgeleme Algoritması (Sabit)", expanded=False):
             st.markdown(f"""
-            * **Birim Yoğurt Satış Fiyatı:** `{sim_birim_fiyat} ₺/kg`
             * **Optimizasyon Yöntemi:** `{sim_opt_mode}`
             """)
 
@@ -1712,7 +1691,7 @@ with st.sidebar:
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
-    st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini doğrudan değiştirebilir veya yeni sipariş ekleyebilirsiniz:")
+    st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini doğrudan değiştirebilir veya ürün listesinden yeni sipariş ekleyebilirsiniz:")
 
     edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
@@ -1739,14 +1718,14 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
                 updated_day_list.append((name_val.strip(), float(qty_val)))
 
         st.markdown("---")
-        st.markdown("**➕ Bu Güne Yeni Sipariş Ekle:**")
+        st.markdown("**➕ Bu Güne Yeni Sipariş Ekle (Ürün Seçimi):**")
         col_n1, col_n2 = st.columns([5, 3])
         with col_n1:
-            new_p_name = st.text_input("Yeni Ürün Adı:", placeholder="örn: KAYMAKSIZ YĞR 1000 G")
+            new_p_name = st.selectbox("Ürün Seçiniz:", options=["(Ürün Seçin)"] + URUN_KATALOGU, key=f"select_new_p_{edit_day}")
         with col_n2:
-            new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0)
+            new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0, key=f"select_new_qty_{edit_day}")
 
-        if new_p_name.strip() and new_p_qty > 0:
+        if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
             updated_day_list.append((new_p_name.strip(), float(new_p_qty)))
 
         st.markdown("---")
@@ -1792,13 +1771,12 @@ else:
 if st.session_state["results"] is not None:
     results = st.session_state["results"]
     toplam_eksik_ton = results["toplam_eksik_genel"]
-    tahmini_ciro_kaybi_tl = toplam_eksik_ton * 1000.0 * sim_birim_fiyat
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
     col2.metric("P6 Efektif Hat Doygunluğu", f"%{results['genel_p6_oee']:.1f}")
     col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
-    col4.metric("Karşılanamayan Sipariş Kaybı", f"{tahmini_ciro_kaybi_tl:,.0f} ₺", delta=f"-{toplam_eksik_ton:.1f} Ton", delta_color="inverse")
+    col4.metric("Karşılanamayan / Eksik Kalan", f"{toplam_eksik_ton:.1f} Ton", delta=f"{'-' if toplam_eksik_ton > 0 else ''}{toplam_eksik_ton:.1f} T", delta_color="inverse")
 
     st.download_button(
         label="📥 Nihai Excel Çizelgesini İndir (.xlsx)",
@@ -1825,15 +1803,15 @@ if st.session_state["results"] is not None:
 
     if current_tab == "📊 Yönetici Özeti":
         if toplam_eksik_ton > 0.05:
-            st.error(f"🚨 **KRİTİK KAPASİTE UYARISI:** Bu hafta P6 pastörizatör ve tesis darboğazı nedeniyle **{toplam_eksik_ton:.1f} Ton** sipariş karşılanamadı / 04:00 mesai sınırına takıldı.\n\n💸 **Tahmini Haftalık Ciro Kaybı:** **{tahmini_ciro_kaybi_tl:,.0f} ₺** *(Birim Fiyat: {sim_birim_fiyat:.1f} ₺/kg üzerinden)*")
+            st.error(f"🚨 **KRİTİK KAPASİTE UYARISI:** Bu hafta P6 pastörizatör ve tesis darboğazı nedeniyle **{toplam_eksik_ton:.1f} Ton** sipariş karşılanamadı / 04:00 mesai sınırına takıldı.")
         else:
-            st.success("✅ **MÜKEMMEL OPERASYONEL PERFORMANS:** Bu haftaki tüm siparişler 04:00 mesai penceresi dolmadan %100 oranında eksiksiz karşılandı. Darboğaz kaynaklı ciro kaybı: **0 ₺**")
+            st.success("✅ **MÜKEMMEL OPERASYONEL PERFORMANS:** Bu haftaki tüm siparişler 04:00 mesai penceresi dolmadan %100 oranında eksiksiz karşılandı. Karşılanamayan sipariş: **0.0 Ton**")
         st.subheader("Haftalık & Günlük KPI Tablosu")
         st.dataframe(results["df_kpi"], use_container_width=True)
         st.pyplot(results["fig_kpi"])
 
     elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)" and st.session_state["is_admin"]:
-        st.subheader("⚖️ Stratejik Senaryo Kıyaslama ve Yatırım Analizi")
+        st.subheader("⚖️ Stratejik Senaryo Kıyaslama ve Kapasite Analizi")
         st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
         with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
             res_curr = results
@@ -1860,26 +1838,23 @@ if st.session_state["results"] is not None:
             )
 
         comp_data = [
-            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['p6_debi']:.1f} T/Sa"},
-            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['kultur_suresi']:.2f} Sa"},
-            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
-            {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
+            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['p6_debi']:.1f} T/Sa"},
+            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
+            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
         kurtarilan_p6_ton = max(0.0, res_curr['toplam_eksik_genel'] - res_max_p6['toplam_eksik_genel'])
-        kurtarilan_p6_tl = kurtarilan_p6_ton * 1000.0 * sim_birim_fiyat
         kurtarilan_both_ton = max(0.0, res_curr['toplam_eksik_genel'] - res_both['toplam_eksik_genel'])
-        kurtarilan_both_tl = kurtarilan_both_ton * 1000.0 * sim_birim_fiyat
 
         st.info(
-            f"💡 **Yönetici & Yatırım Karar Notu:**\n"
-            f"* **P6 Kapasite Artışı (18 T/Sa):** Aktif senaryona kıyasla haftalık **{kurtarilan_p6_ton:.1f} Ton** ek üretim sağlar ve haftalık **{kurtarilan_p6_tl:,.0f} ₺** ciro kaybını önler.\n"
+            f"💡 **Yönetici & Kapasite Karar Notu:**\n"
+            f"* **P6 Kapasite Artışı (18 T/Sa):** Aktif senaryona kıyasla haftalık **{kurtarilan_p6_ton:.1f} Ton** ek üretim sağlar.\n"
             f"* **Optimum Kültür Süresi (0.75 Sa / 45 dk):** Mayalama süresini yarıya indirerek tank devir hızını ikiye katlar, gece hazırlığını rahatlatır ve hatların sabah 08:00'de kesintisiz doluma başlamasını garantiler.\n"
-            f"* **Tam Entegre İkili Yatırım:** Her iki iyileştirme birlikte devreye alındığında haftalık **{kurtarilan_both_ton:.1f} Ton** eksik sipariş kurtarılarak toplam **{kurtarilan_both_tl:,.0f} ₺** ek ciro kazanılır."
+            f"* **Tam Entegre İkili İyileştirme:** Her iki iyileştirme birlikte devreye alındığında haftalık **{kurtarilan_both_ton:.1f} Ton** eksik sipariş kurtarılır."
         )
 
     elif current_tab == "🔍 Denetim Logu":
