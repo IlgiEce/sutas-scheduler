@@ -22,56 +22,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ==============================================================================
-# KULLANICI GİRİŞ VE GOOGLE SHEETS / LOG KAYDI
-# ==============================================================================
-if "auth_user" not in st.session_state:
-    st.session_state["auth_user"] = None
-
-if st.session_state["auth_user"] is None:
-    st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
-    st.info("Sisteme erişebilmek için lütfen adınızı ve departmanınızı belirtiniz.")
-    
-    with st.form("login_form"):
-        user_name = st.text_input("Ad Soyad:")
-        user_dept = st.text_input("Departman / Görev (Opsiyonel):")
-        submit_btn = st.form_submit_button("Sisteme Giriş Yap")
-        
-        if submit_btn:
-            if user_name.strip():
-                st.session_state["auth_user"] = user_name.strip()
-                log_time = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-                
-                # 1. Yerel Log Dosyasına Kayıt
-                try:
-                    with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
-                        f.write(f"Zaman: {log_time} | Kullanıcı: {user_name} | Departman: {user_dept}\n")
-                except Exception:
-                    pass
-                
-                # 2. Google Sheets Bağlantısı (st.connection yapılandırıldıysa devreye girer)
-                try:
-                    from streamlit_gsheets import GSheetsConnection
-                    conn = st.connection("gsheets", type=GSheetsConnection)
-                    df_log = conn.read()
-                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": user_name, "Departman": user_dept}])
-                    df_updated = pd.concat([df_log, new_row], ignore_index=True)
-                    conn.update(data=df_updated)
-                except Exception:
-                    # GSheets bağlantı ayarı yapılmadıysa akışı kesmez
-                    pass
-                
-                st.rerun()
-            else:
-                st.error("Lütfen adınızı giriniz.")
-    st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
-
-# Giriş yapan kullanıcı bilgisi
-st.sidebar.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
-
-# ==============================================================================
-# MEVCUT UYGULAMA KODLARINIZ (DEĞİŞTİRİLMEDEN DEVAM EDER)
-# ==============================================================================
 plt.rcParams["font.sans-serif"] = "DejaVu Sans"
 plt.rcParams["axes.edgecolor"] = "#D9D9D9"
 plt.rcParams["axes.linewidth"] = 0.8
