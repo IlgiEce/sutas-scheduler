@@ -23,14 +23,14 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# KULLANICI GİRİŞ VE GOOGLE SHEETS / LOG KAYDI
+# KULLANICI GİRİŞ VE GOOGLE SHEETS / LOG KAYDI (BURAYA YAPIŞTIRILIYOR)
 # ==============================================================================
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
 
 if st.session_state["auth_user"] is None:
     st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
-    st.info("Sisteme erişebilmek için lütfen adınızı ve departmanınızı belirtiniz.")
+    st.info("Sisteme erişebilmek için lütfen adınızı belirtiniz.")
     
     with st.form("login_form"):
         user_name = st.text_input("Ad Soyad:")
@@ -42,31 +42,36 @@ if st.session_state["auth_user"] is None:
                 st.session_state["auth_user"] = user_name.strip()
                 log_time = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
                 
-                # 1. Yerel Log Dosyasına Kayıt
-                try:
-                    with open("ziyaretciler.txt", "a", encoding="utf-8") as f:
-                        f.write(f"Zaman: {log_time} | Kullanıcı: {user_name} | Departman: {user_dept}\n")
-                except Exception:
-                    pass
-                
-                # 2. Google Sheets Bağlantısı (st.connection yapılandırıldıysa devreye girer)
                 try:
                     from streamlit_gsheets import GSheetsConnection
                     conn = st.connection("gsheets", type=GSheetsConnection)
-                    df_log = conn.read()
-                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": user_name, "Departman": user_dept}])
+                    
+                    # ttl=0 sayesinde her seferinde canlı Google Sheet okunur (önbellek sıfırlanır)
+                    try:
+                        df_log = conn.read(ttl=0)
+                        if df_log is None or df_log.empty:
+                            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                    except Exception:
+                        df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                    
+                    # Boş satırları temizle
+                    df_log = df_log.dropna(how="all")
+                    
+                    new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": user_name }])
                     df_updated = pd.concat([df_log, new_row], ignore_index=True)
+                    
+                    # Güncel listeyi Google E-Tabloya yaz
                     conn.update(data=df_updated)
-                except Exception:
-                    # GSheets bağlantı ayarı yapılmadıysa akışı kesmez
-                    pass
+                except Exception as e:
+                    st.error(f"Google Sheets Bağlantı Hatası: {e}")
+                    st.stop()
                 
                 st.rerun()
             else:
                 st.error("Lütfen adınızı giriniz.")
-    st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
+    st.stop()
 
-# Giriş yapan kullanıcı bilgisi
+# Sol menüde kimin girdiğini gösteren etiket
 st.sidebar.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
 
 # ==============================================================================
