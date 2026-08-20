@@ -487,16 +487,8 @@ def gunluk_tank_hazirligi_v80(
         night_p6 = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
-        # ==============================================================================
-        # ORİJİNAL 163.2 TON ZAMANLAMASINI SAĞLAYAN JIT GECE KÜLTÜR HESABI:
-        # ==============================================================================
-        fiziki_hazir = t_p6_end + datetime.timedelta(hours=kultur_suresi)
-        if fiziki_hazir <= gun_baslangic:
-            actual_ready = gun_baslangic
-            kultur_bas = gun_baslangic - datetime.timedelta(hours=kultur_suresi)
-        else:
-            actual_ready = fiziki_hazir
-            kultur_bas = t_p6_end
+        actual_ready = max(gun_baslangic, t_p6_end + datetime.timedelta(hours=kultur_suresi))
+        kultur_bas = actual_ready - datetime.timedelta(hours=kultur_suresi)
 
         durum_analizi = ""
         if p6_kuyruk_dk > 0:
