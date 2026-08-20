@@ -1182,7 +1182,7 @@ def run_scheduler_pipeline(
     df_kpi = pd.DataFrame(kpi_rows)
 
     # --------------------------------------------------------------------------
-    # EXCEL ÇIKTISI HAZIRLIĞI (GİRİŞ VERİSİ SAYFASI DAHİL)
+    # EXCEL ÇIKTISI HAZIRLIĞI
     # --------------------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -1514,12 +1514,10 @@ with col_head2:
     st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
 
 with st.sidebar:
-    # Sidebar En Üst Logo
     st.image(SUTAS_LOGO_URL, width=130)
     
-    # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
     if st.session_state["is_admin"]:
-        st.success(f"👑 **Yönetici Modu Açık**")
+        st.success("👑 **Yönetici Modu Açık**")
         if st.button("🔄 Normal Kullanıcı Moduna Dön", use_container_width=True):
             st.session_state["is_admin"] = False
             st.session_state["auth_user"] = "Misafir Kullanıcı"
@@ -1559,7 +1557,7 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 2. SENARYO & PARAMETRE AYARLARI (HERKESE GÖRÜNÜR - YÖNETİCİ DÜZENLER, KULLANICI OKUR)
+    # 2. SENARYO & PARAMETRE AYARLARI
     if st.session_state["is_admin"]:
         st.header("🎛️ 2. Senaryo & Parametre Ayarları ✏️")
         st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
@@ -1593,7 +1591,6 @@ with st.sidebar:
                 ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
             )
     else:
-        # NORMAL KULLANICIDA KISITLAR DEĞİŞTİRİLEMEZ AMA ŞEFFAF OLARAK GÖRÜNÜR
         st.header("🎛️ 2. Aktif Fabrika Parametreleri 🔒")
         sim_p6_debi = DEFAULT_PARAMS["p6_debi"]
         sim_kultur_suresi = DEFAULT_PARAMS["kultur_suresi"]
@@ -1779,6 +1776,8 @@ if active_excel_source is not None:
                 ariza_sure=sim_ariza_sure,
             )
         st.success("✅ Senaryo optimizasyonu başarıyla tamamlandı!")
+else:
+    st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
 
 if st.session_state["results"] is not None:
     results = st.session_state["results"]
@@ -1856,7 +1855,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
             {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtlerin)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
             {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
@@ -2024,8 +2023,5 @@ st.markdown(
         <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
-
-elif active_excel_source is None:
-    st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
