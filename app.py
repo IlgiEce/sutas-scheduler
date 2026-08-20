@@ -487,8 +487,10 @@ def gunluk_tank_hazirligi_v80(
         night_p6 = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
-        actual_ready = max(gun_baslangic, t_p6_end + datetime.timedelta(hours=kultur_suresi))
-        kultur_bas = actual_ready - datetime.timedelta(hours=kultur_suresi)
+        # DÜZELTME: JIT ve P6 Kuyruk Akışı Entegrasyonu
+        fiziki_hazir = t_p6_end + datetime.timedelta(hours=kultur_suresi)
+        kultur_bas = t_p6_end
+        actual_ready = max(gun_baslangic, fiziki_hazir)
 
         durum_analizi = ""
         if p6_kuyruk_dk > 0:
@@ -802,9 +804,11 @@ def run_scheduler_pipeline(
                 t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
                 toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req, MAKINE_LISTESI)
 
+                # DÜZELTME: Kalan mesai ve dolum miktarının gerçekçi hesaplanması
+                t_tahmini_hazir = t_p6_start_earliest + datetime.timedelta(hours=(TANK_KAPASITELERI[refill_t_name] / p6_debi) + kultur_suresi)
                 kalan_mesai_saati = max(
                     0.0,
-                    (cutoff_0400 - (t_p6_start_earliest + datetime.timedelta(hours=1.0 + kultur_suresi))).total_seconds() / 3600.0,
+                    (cutoff_0400 - t_tahmini_hazir).total_seconds() / 3600.0,
                 )
                 max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
                 rem_demand_st = sum(o["rem_ton"] for o in order_pool if o["süt_tipi"] == st_req)
@@ -820,10 +824,8 @@ def run_scheduler_pipeline(
                     continue
 
                 dolum_suresi = fill_amount / p6_debi
-                t_p6_start_jit = max(
-                    t_p6_start_earliest,
-                    p_start - datetime.timedelta(hours=dolum_suresi + kultur_suresi),
-                )
+                # DÜZELTME: P6 Kuyruk kilitlenmesini engelleyen akış
+                t_p6_start_jit = t_p6_start_earliest
 
                 if p6_state["kumulatif_ton"] + fill_amount > p6_cip_limit:
                     t_p6_start_jit = max(t_p6_start_jit, t_cip_end) + datetime.timedelta(hours=p6_cip_suresi)
