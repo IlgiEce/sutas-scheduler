@@ -11,6 +11,31 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 import pandas as pd
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+from datetime import datetime
+
+# Google Sheets Bağlantısı
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+if "user_name" not in st.session_state:
+    name = st.text_input("Lütfen adınızı girin:")
+    if st.button("Giriş Yap") and name:
+        st.session_state["user_name"] = name
+        
+        # Mevcut veriyi oku ve yeni kaydı ekle
+        existing_data = conn.read()
+        new_row = pd.DataFrame([{
+            "Ziyaretçi": name,
+            "Tarih": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }])
+        updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+        
+        # Google E-Tabloya geri kaydet
+        conn.update(data=updated_df)
+        st.rerun()
+    st.stop()
+
+st.write(f"Hoş geldin, {st.session_state['user_name']}!")
 
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
