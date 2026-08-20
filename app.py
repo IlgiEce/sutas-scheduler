@@ -76,7 +76,7 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    # Sayfa ortasında derli toplu ve kibar giriş kartı
+    # Sayfa ortasında derli toplu giriş kartı
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     
     with col_l2:
@@ -106,7 +106,7 @@ if st.session_state["auth_user"] is None:
         else:
             st.warning("🔒 **Yönetici Giriş Paneli**")
             with st.form("admin_form", clear_on_submit=False):
-                admin_name = st.text_input("Yönetici Ad Soyad:", placeholder="örn: İlgi Ece Çakmak")
+                admin_name = st.text_input("Yönetici Ad Soyad:", placeholder="örn: Sistem Yöneticisi")
                 pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
                 admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap ↵", use_container_width=True, type="primary")
                 
@@ -1571,7 +1571,7 @@ with st.sidebar:
 
         with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
             sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, value=float(st.session_state.get("p6_debi", DEFAULT_PARAMS["p6_debi"])), step=0.5, key="p6_debi")
-            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=0.5, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
+            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=1.0, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
             sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", DEFAULT_PARAMS["max_kultur_bekleme"])), step=0.5, key="max_kultur_bekleme")
             sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
             sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
@@ -1839,14 +1839,14 @@ if st.session_state["results"] is not None:
                 ariza_saat_str=sim_ariza_saat_str, ariza_sure=sim_ariza_sure,
             )
             res_opt_cult = run_scheduler_pipeline(
-                excel_source=active_excel_source, p6_debi=sim_p6_debi, kultur_suresi=0.75,
+                excel_source=active_excel_source, p6_debi=sim_p6_debi, kultur_suresi=1.0,
                 tank_cip_suresi=sim_tank_cip_suresi, max_kultur_bekleme=sim_max_kultur_bekleme, makine_max_calisma=sim_makine_max_calisma,
                 p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati,
                 opt_mode=sim_opt_mode, ariza_aktif=sim_ariza_aktif, ariza_gun=sim_ariza_gun, ariza_makine=sim_ariza_makine,
                 ariza_saat_str=sim_ariza_saat_str, ariza_sure=sim_ariza_sure,
             )
             res_both = run_scheduler_pipeline(
-                excel_source=active_excel_source, p6_debi=18.0, kultur_suresi=0.75,
+                excel_source=active_excel_source, p6_debi=18.0, kultur_suresi=1.0,
                 tank_cip_suresi=sim_tank_cip_suresi, max_kultur_bekleme=sim_max_kultur_bekleme, makine_max_calisma=sim_makine_max_calisma,
                 p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati,
                 opt_mode=sim_opt_mode, ariza_aktif=sim_ariza_aktif, ariza_gun=sim_ariza_gun, ariza_makine=sim_ariza_makine,
@@ -1854,12 +1854,12 @@ if st.session_state["results"] is not None:
             )
 
         comp_data = [
-            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['p6_debi']:.1f} T/Sa"},
-            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
-            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['p6_debi']:.1f} T/Sa"},
+            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
+            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
@@ -1869,7 +1869,7 @@ if st.session_state["results"] is not None:
         st.info(
             f"💡 **Yönetici & Kapasite Karar Notu:**\n"
             f"* **P6 Kapasite Artışı (18 T/Sa):** Aktif senaryona kıyasla haftalık **{kurtarilan_p6_ton:.1f} Ton** ek üretim sağlar.\n"
-            f"* **Optimum Kültür Süresi (0.75 Sa / 45 dk):** Mayalama süresini yarıya indirerek tank devir hızını ikiye katlar, gece hazırlığını rahatlatır ve hatların sabah 08:00'de kesintisiz doluma başlamasını garantiler.\n"
+            f"* **Optimum Kültür Süresi (1.0 Sa / 60 dk):** Mayalama süresini 1 saate çekerek tank devir hızını artırır, gece hazırlığını rahatlatır ve hatların sabah 08:00'de kesintisiz doluma başlamasını garantiler.\n"
             f"* **Tam Entegre İkili İyileştirme:** Her iki iyileştirme birlikte devreye alındığında haftalık **{kurtarilan_both_ton:.1f} Ton** eksik sipariş kurtarılır."
         )
 
