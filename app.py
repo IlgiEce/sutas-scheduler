@@ -16,9 +16,9 @@ import plotly.graph_objects as go
 import re
 
 # ==============================================================================
-# GELİŞTİRİCİ & TELİF TANIMLARI (BURAYI KENDİ ADINIZLA DOLDURUN)
+# GELİŞTİRİCİ & TELİF TANIMLARI
 # ==============================================================================
-DEVELOPER_NAME = "İlgi Ece Çakmak"  # Geliştirici & Telif Sahibi
+DEVELOPER_NAME = "İlgi Ece Çakmak"
 SUTAS_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png"
 
 # ==============================================================================
@@ -26,7 +26,7 @@ SUTAS_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F
 # ==============================================================================
 st.set_page_config(
     page_title="Sütaş Karacabey Master Scheduler & DSS",
-    page_icon="https://upload.wikimedia.org/wikipedia/tr/9/91/S%C3%BCta%C5%9F_logo.png",
+    page_icon=SUTAS_LOGO_URL,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -58,11 +58,10 @@ if "admin_login_mode" not in st.session_state:
 if st.session_state["auth_user"] is None:
     col_log1, col_log2 = st.columns([1, 4])
     with col_log1:
- #İLGİ ECE ÇAKMAK
         st.image(SUTAS_LOGO_URL, width=130)
     with col_log2:
         st.markdown("### Sütaş Karacabey Master Scheduler & DSS")
-        st.caption(f"🚀 Tasarım & Algoritmik Modelleme: **{İLGİ ECE ÇAKMAK}**")
+        st.caption(f"🚀 Developer: **{DEVELOPER_NAME}**")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -1221,7 +1220,7 @@ def run_scheduler_pipeline(
     ws_kpi.views.sheetView[0].showGridLines = True
     ws_kpi.merge_cells("A1:I2")
     t_cell = ws_kpi["A1"]
-    t_cell.value = "🏭 SÜTAŞ KARACABEY YOĞURT HATTI - AKILLI ÜRETİM & İŞGÜCÜ DASHBOARD'U"
+    t_cell.value = "SÜTAŞ KARACABEY YOĞURT HATTI - AKILLI ÜRETİM & İŞGÜCÜ DASHBOARD'U"
     t_cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
     t_cell.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     t_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1512,7 +1511,7 @@ with col_head1:
     st.image(SUTAS_LOGO_URL, width=140)
 with col_head2:
     st.title("Sütaş Karacabey Master Scheduler & DSS")
-    st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Tasarım & Algoritmik Modelleme:** `{İLGİ ECE ÇAKMAK}`")
+    st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
 
 with st.sidebar:
     # Sidebar En Üst Logo
@@ -1541,7 +1540,7 @@ with st.sidebar:
 
     # 1. VERİ KAYNAĞI
     st.header("📂 1. Veri Kaynağı")
-    veri_secenekleri = ["🏭 Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
+    veri_secenekleri = ["Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
     if st.session_state["is_admin"]:
         veri_secenekleri.append("✏️ Ham Veri Düzenleme (Yönetici)")
 
@@ -1699,7 +1698,7 @@ with st.sidebar:
         """)
 
     st.markdown("---")
-    st.caption(f"🛡️ © 2026 Sütaş DSS Platformu\n\n**Geliştirici:** {İLGİ ECE ÇAKMAK}")
+    st.caption(f"🛡️ © 2026 Sütaş DSS Platformu\n\n**Developer:** {DEVELOPER_NAME}")
 
 # ==============================================================================
 # HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
@@ -1980,7 +1979,7 @@ if st.session_state["results"] is not None:
                     "dt_start": False,
                     "dt_end": False,
                 },
-                title=f"🏭 {secilen_gantt_gun} Günü İnteraktif Üretim Akışı (Mouse ile üzerine gelin, yakınlaştırın)",
+                title=f"{secilen_gantt_gun} Günü İnteraktif Üretim Akışı (Mouse ile üzerine gelin, yakınlaştırın)",
             )
 
             fig_plotly.update_yaxes(autorange="reversed")
@@ -2020,8 +2019,8 @@ st.markdown("---")
 st.markdown(
     f"""
     <div style="text-align: center; color: #595959; font-size: 13px; padding: 15px 0;">
-        <b>🏭 Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
-        Tasarım, Matematiksel Modelleme & Çizelgeleme Mimarisi: <b>{İLGİ ECE ÇAKMAK}</b><br>
+        <b>Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
+        Developer: <b>{DEVELOPER_NAME}</b><br>
         <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
     </div>
     """,
