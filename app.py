@@ -16,6 +16,11 @@ import plotly.graph_objects as go
 import re
 
 # ==============================================================================
+# GELİŞTİRİCİ & TELİF TANIMLARI
+# ==============================================================================
+DEVELOPER_NAME = "İlgi Ece Çakmak"
+
+# ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
 # ==============================================================================
 st.set_page_config(
@@ -28,7 +33,7 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
+ADMIN_PIN = "1661"  # 4 Haneli Yönetici Şifresi
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -50,7 +55,8 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    st.markdown("### 🏭 Sütaş Karacabey Master Scheduler & DSS")
+    st.markdown("### 🥛 Sütaş Karacabey Master Scheduler & DSS")
+    st.caption(f"🚀 Developer: **{DEVELOPER_NAME}**")
     
     if not st.session_state["admin_login_mode"]:
         st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı belirtiniz.")
@@ -70,7 +76,7 @@ if st.session_state["auth_user"] is None:
                     turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
                     log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
                     
-                    # Google Sheets Bağlantısı
+                    # Google Sheets Bağlantısı (Donmayı önlemek için korumalı blok)
                     try:
                         from streamlit_gsheets import GSheetsConnection
                         conn = st.connection("gsheets", type=GSheetsConnection)
@@ -114,7 +120,7 @@ if st.session_state["auth_user"] is None:
             st.session_state["admin_login_mode"] = False
             st.rerun()
 
-    st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
+    st.stop()
 
 # ==============================================================================
 # MEVCUT UYGULAMA TANIMLARI
@@ -1171,7 +1177,7 @@ def run_scheduler_pipeline(
     df_kpi = pd.DataFrame(kpi_rows)
 
     # --------------------------------------------------------------------------
-    # EXCEL ÇIKTISI HAZIRLIĞI (GİRİŞ VERİSİ SAYFASI DAHİL)
+    # EXCEL ÇIKTISI HAZIRLIĞI
     # --------------------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -1209,7 +1215,7 @@ def run_scheduler_pipeline(
     ws_kpi.views.sheetView[0].showGridLines = True
     ws_kpi.merge_cells("A1:I2")
     t_cell = ws_kpi["A1"]
-    t_cell.value = "🏭 SÜTAŞ KARACABEY YOĞURT HATTI - AKILLI ÜRETİM & İŞGÜCÜ DASHBOARD'U"
+    t_cell.value = "SÜTAŞ KARACABEY YOĞURT HATTI - AKILLI ÜRETİM & İŞGÜCÜ DASHBOARD'U"
     t_cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
     t_cell.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     t_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -1492,8 +1498,11 @@ def varsayilana_sifirla():
     st.rerun()
 
 
-st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
-st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
+# ------------------------------------------------------------------------------
+# SAYFA ÜSTÜ: TELİF ROZETİ
+# ------------------------------------------------------------------------------
+st.title("🥛 Sütaş Karacabey Master Scheduler & DSS")
+st.markdown(f"Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru. | **Developer:** `{DEVELOPER_NAME}`")
 
 with st.sidebar:
     # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
@@ -1519,7 +1528,7 @@ with st.sidebar:
 
     # 1. VERİ KAYNAĞI
     st.header("📂 1. Veri Kaynağı")
-    veri_secenekleri = ["🏭 Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
+    veri_secenekleri = ["Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
     if st.session_state["is_admin"]:
         veri_secenekleri.append("✏️ Ham Veri Düzenleme (Yönetici)")
 
@@ -1675,6 +1684,9 @@ with st.sidebar:
         * **Büyük Kova:** 6.0 Operatör/Saat
         * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
         """)
+
+    st.markdown("---")
+    st.caption(f"🛡️ © 2026 Sütaş DSS Platformu\n\n**Developer:** {DEVELOPER_NAME}")
 
 # ==============================================================================
 # HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
@@ -1832,7 +1844,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
             {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtlerin)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (0.75 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"%{res_both['genel_p6_oee']:.1f}"},
             {"Performans Göstergesi": "Darboğaz Kaynaklı Ciro Kaybı (₺)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{(res_curr['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{(res_max_p6['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "3. Optimum Kültür Önerisi (0.75 Sa)": f"{(res_opt_cult['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺", "4. Tam Entegre İkili Yatırım (P6+Kültür)": f"{(res_both['toplam_eksik_genel'] * 1000 * sim_birim_fiyat):,.0f} ₺"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
@@ -1955,7 +1967,7 @@ if st.session_state["results"] is not None:
                     "dt_start": False,
                     "dt_end": False,
                 },
-                title=f"🏭 {secilen_gantt_gun} Günü İnteraktif Üretim Akışı (Mouse ile üzerine gelin, yakınlaştırın)",
+                title=f"{secilen_gantt_gun} Günü İnteraktif Üretim Akışı (Mouse ile üzerine gelin, yakınlaştırın)",
             )
 
             fig_plotly.update_yaxes(autorange="reversed")
@@ -1990,3 +2002,18 @@ if st.session_state["results"] is not None:
 
 elif active_excel_source is None:
     st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
+
+# ------------------------------------------------------------------------------
+# SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
+# ------------------------------------------------------------------------------
+st.markdown("---")
+st.markdown(
+    f"""
+    <div style="text-align: center; color: #595959; font-size: 13px; padding: 15px 0;">
+        <b>Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
+        Developer: <b>{DEVELOPER_NAME}</b><br>
+        <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
