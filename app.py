@@ -121,12 +121,6 @@ if st.session_state["auth_user"] is None:
 
     st.stop()  # Giriş yapılana kadar uygulamanın geri kalanını çalıştırmaz
 
-# Sidebar Bilgilendirmesi
-if st.session_state["is_admin"]:
-    st.sidebar.success(f"👑 **Yönetici:** `{st.session_state['auth_user']}`")
-else:
-    st.sidebar.markdown(f"👤 **Kullanıcı:** `{st.session_state['auth_user']}`")
-
 # ==============================================================================
 # MEVCUT UYGULAMA KODLARINIZ
 # ==============================================================================
@@ -1483,6 +1477,30 @@ st.title("🏭 Sütaş Karacabey Master Scheduler & DSS Platformu")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
+    # --------------------------------------------------------------------------
+    # EN ÜST: ROL VE MOD DEĞİŞTİRME PANELİ
+    # --------------------------------------------------------------------------
+    if st.session_state["is_admin"]:
+        st.success(f"👑 **Yönetici Modu Açık**")
+        if st.button("🔄 Normal Kullanıcı Moduna Dön", use_container_width=True):
+            st.session_state["is_admin"] = False
+            st.session_state["auth_user"] = "Misafir Kullanıcı"
+            st.rerun()
+    else:
+        st.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
+        with st.expander("🔑 **Yönetici Moduna Geç**", expanded=False):
+            elevate_pin = st.text_input("4 Haneli Kod:", type="password", max_chars=4, key="elevate_pin_input")
+            if st.button("Yetkiyi Yükselt 🔓", key="btn_elevate", use_container_width=True):
+                if elevate_pin == ADMIN_PIN:
+                    st.session_state["is_admin"] = True
+                    st.session_state["auth_user"] = "Sistem Yöneticisi"
+                    st.rerun()
+                else:
+                    st.error("❌ Hatalı PIN!")
+
+    st.markdown("---")
+
+    # 1. VERİ KAYNAĞI
     st.header("📂 1. Veri Kaynağı")
     veri_secenekleri = ["🏭 Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
     if st.session_state["is_admin"]:
@@ -1496,34 +1514,10 @@ with st.sidebar:
         if uploaded_file is not None:
             active_excel_source = uploaded_file
     elif veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
-        st.info("💡 Siparişleri ekleyip silebilir veya tonajlarını değiştirebilirsiniz. Değişiklikler otomatik olarak üretim planına yansır.")
-        edit_day = st.selectbox("Düzenlenecek Gün:", list(st.session_state["custom_factory_data"].keys()))
-        
-        # Güncel günün verisi
-        cur_day_data = pd.DataFrame(st.session_state["custom_factory_data"][edit_day], columns=["Açıklama", "Süt Karşılığı (Lt)"])
-        
-        edited_df = st.data_editor(
-            cur_day_data,
-            use_container_width=True,
-            num_rows="dynamic",
-            key=f"editor_{edit_day}",
-            column_config={
-                "Açıklama": st.column_config.TextColumn("Ürün Açıklaması", required=True),
-                "Süt Karşılığı (Lt)": st.column_config.NumberColumn("Süt Karşılığı (Lt)", min_value=0.0, step=100.0, required=True),
-            }
-        )
-        
-        # Yeni güncellenen listeyi kaydet
-        new_list = [
-            (str(r["Açıklama"]).strip(), float(r["Süt Karşılığı (Lt)"]))
-            for _, r in edited_df.iterrows()
-            if pd.notnull(r["Açıklama"]) and str(r["Açıklama"]).strip() != "" and pd.notnull(r["Süt Karşılığı (Lt)"])
-        ]
-        st.session_state["custom_factory_data"][edit_day] = new_list
         active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
     else:
         active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
-        st.success("✅ Sütaş Karacabey 6 günlük gerçek fabrika projeksiyonu aktif.")
+        st.success("✅ Sütaş Karacabey 6 günlük fabrika projeksiyonu aktif.")
 
     st.markdown("---")
 
@@ -1640,25 +1634,67 @@ with st.sidebar:
         * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
         """)
 
-    # NORMAL KULLANICILAR İÇİN YÖNETİCİYE GEÇİŞ PATH'İ
-    if not st.session_state["is_admin"]:
-        st.markdown("---")
-        with st.expander("🔑 Yönetici Girişi Yap"):
-            elevate_pin = st.text_input("4 Haneli Kod:", type="password", max_chars=4, key="elevate_pin_input")
-            if st.button("Yetkiyi Yükselt", key="btn_elevate"):
-                if elevate_pin == ADMIN_PIN:
-                    st.session_state["is_admin"] = True
-                    st.session_state["auth_user"] = "Sistem Yöneticisi"
-                    st.rerun()
-                else:
-                    st.error("Hatalı kod!")
+# ==============================================================================
+# HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
+# ==============================================================================
+if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
+    st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
+    st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini doğrudan değiştirebilir veya yeni sipariş ekleyebilirsiniz:")
 
+    edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
+    current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
+
+    with st.form("custom_data_edit_form"):
+        st.write(f"### 📋 {edit_day} Günü Sipariş Listesi")
+        
+        updated_day_list = []
+        col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
+        col_h1.markdown("**Ürün Açıklaması**")
+        col_h2.markdown("**Süt Miktarı (Lt) ✏️**")
+        col_h3.markdown("**Siparişi Sil 🗑️**")
+
+        for idx, (p_name, p_qty) in enumerate(current_day_orders):
+            c1, c2, c3 = st.columns([5, 3, 2])
+            with c1:
+                name_val = st.text_input(f"Ürün #{idx+1}", value=p_name, key=f"name_{edit_day}_{idx}", label_visibility="collapsed")
+            with c2:
+                qty_val = st.number_input(f"Miktar #{idx+1}", value=float(p_qty), step=100.0, min_value=0.0, key=f"qty_{edit_day}_{idx}", label_visibility="collapsed")
+            with c3:
+                delete_check = st.checkbox("🗑️ SİL", key=f"del_{edit_day}_{idx}")
+
+            if not delete_check and name_val.strip() != "":
+                updated_day_list.append((name_val.strip(), float(qty_val)))
+
+        st.markdown("---")
+        st.markdown("**➕ Bu Güne Yeni Sipariş Ekle:**")
+        col_n1, col_n2 = st.columns([5, 3])
+        with col_n1:
+            new_p_name = st.text_input("Yeni Ürün Adı:", placeholder="örn: KAYMAKSIZ YĞR 1000 G")
+        with col_n2:
+            new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0)
+
+        if new_p_name.strip() and new_p_qty > 0:
+            updated_day_list.append((new_p_name.strip(), float(new_p_qty)))
+
+        st.markdown("---")
+        confirm_btn = st.form_submit_button("💾 Değişiklikleri Onayla & Üretim Planına Aktar", type="primary", use_container_width=True)
+
+        if confirm_btn:
+            st.session_state["custom_factory_data"][edit_day] = updated_day_list
+            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi! Aşağıdaki butona basarak yeni planı optimize edebilirsiniz.")
+            st.rerun()
+
+    st.markdown("---")
+
+# ==============================================================================
+# OPTİMİZASYON VE HESAPLAMA MOTORU
+# ==============================================================================
 if "results" not in st.session_state:
     st.session_state["results"] = None
 
 if active_excel_source is not None:
-    if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run"):
-        with st.spinner("Matematiksel kısıtlar, arızalar ve senaryo hesaplanıyor..."):
+    if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run", use_container_width=True):
+        with st.spinner("Matematiksel kısıtlar, arızalar ve güncel siparişler hesaplanıyor..."):
             st.session_state["results"] = run_scheduler_pipeline(
                 excel_source=active_excel_source,
                 p6_debi=sim_p6_debi,
