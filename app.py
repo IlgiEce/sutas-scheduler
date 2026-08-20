@@ -2003,7 +2003,7 @@ if st.session_state["results"] is not None:
         else:
             st.info("Gantt şeması oluşturmak için lütfen sol menüden simülasyonu çalıştırın.")
 
-    elif current_tab == "📅 Günlük Çizelgeler":
+   elif current_tab == "📅 Günlük Çizelgeler":
         st.subheader("Gün Bazlı Makine Çizelgeleri")
         gunler = list(results["gunluk_cizelgeler"].keys())
         selected_day = st.selectbox("Görüntülenecek Günü Seçin", gunler, key="day_selector")
@@ -2011,6 +2011,9 @@ if st.session_state["results"] is not None:
             df_to_show = results["gunluk_cizelgeler"][selected_day]
             display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi"], errors="ignore")
             st.dataframe(display_df, use_container_width=True)
+
+elif active_excel_source is None:
+    st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
 
 # ------------------------------------------------------------------------------
 # SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
