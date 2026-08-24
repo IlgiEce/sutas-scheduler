@@ -529,7 +529,7 @@ def gunluk_tank_hazirligi_v80(
     day_idx,
     day_name,
     gun_baslangic,
-    tank_states,
+    tanks,
     assigned_types,
     p6_state,
     audit_log_list,
@@ -537,8 +537,8 @@ def gunluk_tank_hazirligi_v80(
     kultur_suresi,
     p6_cip_limit,
     p6_cip_suresi,
+    tank_cip_suresi,
 ):
-    tanks = {}
     tank_list = [("T43", 38.0), ("T40", 25.0), ("T41", 25.0), ("T42", 25.0)]
 
     if day_idx == 1:
@@ -570,21 +570,28 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
-    # Gece hazırlığı: Erken boşalan tankları P6'ya öne alarak sabah 08:00'e yetiştirme
+    # Gece vardiyasında sabah 08:00 başlangıcı için ilk 2 tankı öncelikli hazırla
+    # Kalan tanklar gün içi dinamik doluma devredilir (Böylece P6 kuyruğu şişmez)
     sorted_tanks = sorted(
         tank_list,
-        key=lambda item: tank_states.get(item[0], {}).get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)),
+        key=lambda item: tanks.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=6)),
     )
-    night_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
+    
+    night_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=6))
 
-    for idx, (tk_name, cap) in enumerate(sorted_tanks):
+    for idx, (tk_name, cap) in enumerate(sorted_tanks[:2]):
         st = assigned_types[idx % len(assigned_types)]
-        prev_state = tank_states.get(tk_name, {})
+        prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=7))
-        t_cip_done = prev_state.get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6))
+        t_cip_done = max(t_bosaldi + datetime.timedelta(hours=tank_cip_suresi), prev_state.get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)))
 
-        t_p6_start = max(t_cip_done, night_p6)
-        p6_kuyruk_dk = int((t_p6_start - t_cip_done).total_seconds() / 60)
+        # JIT dolum mantığı: 08:00'e yetiştirmek için gereken en geç başlama saati
+        dolum_h = cap / p6_debi
+        t_target_start = gun_baslangic - datetime.timedelta(hours=dolum_h + kultur_suresi)
+        t_p6_start = max(t_cip_done, night_p6, t_target_start)
+        
+        # Gerçek P6 bekleme kuyruğu (Sadece P6 meşgul olduğu için bekleme)
+        p6_kuyruk_dk = max(0, int((night_p6 - t_target_start).total_seconds() / 60)) if night_p6 > t_target_start else 0
 
         cip_p6_notu = ""
         if p6_state["kumulatif_ton"] + cap > p6_cip_limit:
@@ -592,27 +599,26 @@ def gunluk_tank_hazirligi_v80(
             p6_state["kumulatif_ton"] = 0.0
             cip_p6_notu = f" (🧼 P6 {int(p6_cip_limit)}T Limit CIP)"
 
-        dolum_h = cap / p6_debi
         t_p6_end = t_p6_start + datetime.timedelta(hours=dolum_h)
         night_p6 = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
         actual_ready = max(gun_baslangic, t_p6_end + datetime.timedelta(hours=kultur_suresi))
-        kultur_bas = actual_ready - datetime.timedelta(hours=kultur_suresi)
+        kultur_bas = t_p6_end
 
         durum_analizi = ""
         if p6_kuyruk_dk > 0:
-            durum_analizi = f"⚠️ P6 Hat Kuyruğu: Tank CIP bitişinden itibaren {p6_kuyruk_dk} dk boyunca P6 pastörizatörünün boşa çıkması beklendi."
+            durum_analizi = f"⚠️ P6 Kuyruğu: {p6_kuyruk_dk} dk P6 pastörizatörü beklendi."
             if cip_p6_notu:
                 durum_analizi += f" + {p6_cip_suresi} Sa P6 Yıkama."
         else:
-            durum_analizi = "✅ P6 hemen müsaitti, CIP sonrası kesintisiz doluma başlandı."
+            durum_analizi = "✅ P6 JIT planlandı, 08:00 vardiyasına hazırlandı."
 
         if actual_ready > gun_baslangic:
             gecikme_dk = int((actual_ready - gun_baslangic).total_seconds() / 60)
-            durum_analizi += f" 👉 08:00'e yetişemedi ({gecikme_dk} dk gecikme: JIT Kültür {kultur_bas.strftime('%H:%M')} -> Hazır {actual_ready.strftime('%H:%M')})."
+            durum_analizi += f" 👉 08:00'e {gecikme_dk} dk gecikme ile hazırlandı."
         else:
-            durum_analizi += f" 👉 08:00 vardiya başlangıcına zamanında yetişti (JIT Kültür: {kultur_bas.strftime('%H:%M')})."
+            durum_analizi += " 👉 08:00 vardiya başlangıcına zamanında yetişti."
 
         tanks[tk_name] = {
             "kapasite": cap,
@@ -639,6 +645,25 @@ def gunluk_tank_hazirligi_v80(
             "Mayalanma Bitiş (Hazır)": actual_ready.strftime("%d-%m %H:%M"),
             "Sistemsel Durum & Bekleme Analizi": durum_analizi,
         })
+
+    # Diğer 2 tank gün içi ihtiyaç anında doldurulmak üzere temiz ve hazır bırakılır
+    for idx, (tk_name, cap) in enumerate(sorted_tanks[2:], start=2):
+        st = assigned_types[idx % len(assigned_types)]
+        prev_state = tanks.get(tk_name, {})
+        t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=6))
+        t_cip_done = max(t_bosaldi + datetime.timedelta(hours=tank_cip_suresi), prev_state.get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)))
+        
+        tanks[tk_name] = {
+            "kapasite": cap,
+            "mevcut_sut": 0.0,  # Gün içi dinamik doluma hazır
+            "sut_tipi": st,
+            "cip_musait_zaman": t_cip_done,
+            "dolum_bitis": None,
+            "kultur_saati": None,
+            "hazir_saat": gun_baslangic,
+            "bosalma_saati": t_bosaldi,
+            "bagli_makineler": [],
+        }
 
     p6_state["musaitlik"] = max(night_p6, gun_baslangic)
     return tanks
@@ -720,10 +745,10 @@ def run_scheduler_pipeline(
     all_schedule_rows = []
 
     tank_states = {
-        "T43": {"cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6)},
-        "T40": {"cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6)},
-        "T41": {"cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6)},
-        "T42": {"cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6)},
+        "T43": {"kapasite": 38.0, "mevcut_sut": 38.0, "sut_tipi": "TAM YAĞLI", "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6), "hazir_saat": baslangic_gunu, "kultur_saati": baslangic_gunu - datetime.timedelta(hours=kultur_suresi)},
+        "T40": {"kapasite": 25.0, "mevcut_sut": 25.0, "sut_tipi": "TAM YAĞLI", "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6), "hazir_saat": baslangic_gunu, "kultur_saati": baslangic_gunu - datetime.timedelta(hours=kultur_suresi)},
+        "T41": {"kapasite": 25.0, "mevcut_sut": 25.0, "sut_tipi": "%5 YAĞLI", "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6), "hazir_saat": baslangic_gunu, "kultur_saati": baslangic_gunu - datetime.timedelta(hours=kultur_suresi)},
+        "T42": {"kapasite": 25.0, "mevcut_sut": 25.0, "sut_tipi": "YARIM YAĞLI", "cip_musait_zaman": baslangic_gunu - datetime.timedelta(hours=6), "bosalma_saati": baslangic_gunu - datetime.timedelta(hours=6), "hazir_saat": baslangic_gunu, "kultur_saati": baslangic_gunu - datetime.timedelta(hours=kultur_suresi)},
     }
 
     p6_state = {"musaitlik": baslangic_gunu - datetime.timedelta(hours=6), "kumulatif_ton": 0.0}
@@ -773,6 +798,7 @@ def run_scheduler_pipeline(
             kultur_suresi,
             p6_cip_limit,
             p6_cip_suresi,
+            tank_cip_suresi,
         )
 
         machines = {
@@ -978,6 +1004,22 @@ def run_scheduler_pipeline(
                 tanks[refill_t_name]["dolum_bitis"] = p6_end
                 tanks[refill_t_name]["kultur_saati"] = kultur_bas
                 tanks[refill_t_name]["hazir_saat"] = kultur_hazir
+
+                # Denetim loguna gün içi dolumu kaydet
+                p6_kuyruk_dinamik_dk = max(0, int((t_p6_start_jit - t_p6_start_earliest).total_seconds() / 60))
+                audit_log_list.append({
+                    "Gün": f"GÜN {day_idx} ({sheet_name})",
+                    "Tank": refill_t_name,
+                    "Kapasite (Ton)": fill_amount,
+                    "Süt Tipi": st_req,
+                    "Önceki Gün Boşalma": t_bosaldi.strftime("%d-%m %H:%M"),
+                    "Tank CIP Bitiş (Hazır)": t_cip_end.strftime("%d-%m %H:%M"),
+                    "P6 Dolum Başlangıç": t_p6_start_jit.strftime("%d-%m %H:%M"),
+                    "P6 Bitiş (JIT Kültür)": p6_end.strftime("%d-%m %H:%M"),
+                    "P6 Dolum Kuyruğu": f"{p6_kuyruk_dinamik_dk} dk" if p6_kuyruk_dinamik_dk > 0 else "-",
+                    "Mayalanma Bitiş (Hazır)": kultur_hazir.strftime("%d-%m %H:%M"),
+                    "Sistemsel Durum & Bekleme Analizi": f"🔄 Gün içi dinamik dolum: {round(fill_amount,1)}T süt mayalandı.",
+                })
 
                 best_t_name = refill_t_name
                 best_t_info = tanks[refill_t_name]
