@@ -842,7 +842,6 @@ def run_scheduler_pipeline(
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
-            # Arızada üretimin yapay olarak artmasını engelleyen katı kilit
             if is_ariza_gunu and chosen_m_name != ariza_makine:
                 matching_orders = [
                     o for o in order_pool
@@ -1044,7 +1043,6 @@ def run_scheduler_pipeline(
                 else:
                     break
 
-        # Dinamik Çapraz Rotasyonlu İşgücü Hesabı (30 Dk Örneklemeli T-Anı Havuz Modeli)
         for h_i in range(mesai_h):
             t_mid = gun_baslangic + datetime.timedelta(hours=h_i, minutes=30)
             active_m_ops = []
@@ -1918,7 +1916,6 @@ if st.session_state["results"] is not None:
         saatler = [f"{8+i:02d}:00" if 8+i < 24 else f"{8+i-24:02d}:00" for i in range(mesai_h)]
 
         if secilen_isgucu_gorunumu == "📊 Haftalık Genel Ortalama":
-            # Haftalık en yüksek ihtiyaç (Hafta boyunca herhangi bir t anındaki mutlak tepe operatör sayısı)
             tum_hafta_degerleri = [v for g_vals in results["gunluk_saatlik_isgucu"].values() for v in g_vals]
             peak_val = max(tum_hafta_degerleri) if tum_hafta_degerleri else 0.0
             
