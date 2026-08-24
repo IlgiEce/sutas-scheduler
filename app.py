@@ -55,18 +55,14 @@ def sheet_log_kaydet(kullanici_etiketi: str):
         conn = st.connection("gsheets", type=GSheetsConnection)
         try:
             df_log = conn.read(ttl=0)
+            if df_log is None or df_log.empty:
+                df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
         except Exception:
-            df_log = None
-            
-        new_entry = {"Zaman": log_time, "Kullanıcı": kullanici_etiketi}
+            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
         
-        if df_log is not None and not df_log.empty:
-            df_log = df_log.dropna(how="all")
-            new_row = pd.DataFrame([new_entry])
-            df_updated = pd.concat([df_log, new_row], ignore_index=True)
-        else:
-            df_updated = pd.DataFrame([new_entry])
-        
+        df_log = df_log.dropna(how="all")
+        new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": kullanici_etiketi}])
+        df_updated = pd.concat([df_log, new_row], ignore_index=True)
         conn.update(data=df_updated)
     except Exception:
         pass
@@ -427,6 +423,16 @@ def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
     return 3.5
 
 
+def sut_tipi_toplam_hiz_getir(sut_tipi, makineler):
+    tot = 0.0
+    for m in makineler:
+        for g, bil in MAKINE_HIZLARI[m].items():
+            if bil["sut_tipi"] == sut_tipi:
+                tot += bil["hiz"]
+                break
+    return max(2.5, tot)
+
+
 def dinamik_projeksiyon_oku(excel_source, sheet_name):
     df = pd.read_excel(excel_source, sheet_name=sheet_name, header=None)
     header_row = 0
@@ -547,6 +553,7 @@ def gunluk_tank_hazirligi_v80(
                 "kultur_saati": gun_baslangic - datetime.timedelta(hours=kultur_suresi),
                 "hazir_saat": gun_baslangic,
                 "bosalma_saati": gun_baslangic,
+                "bagli_makineler": [],
             }
             audit_log_list.append({
                 "Gün": f"GÜN {day_idx} ({day_name})",
@@ -563,6 +570,7 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
+    # Gece hazırlığı: Erken boşalan tankları P6'ya öne alarak sabah 08:00'e yetiştirme
     sorted_tanks = sorted(
         tank_list,
         key=lambda item: tank_states.get(item[0], {}).get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)),
@@ -615,6 +623,7 @@ def gunluk_tank_hazirligi_v80(
             "kultur_saati": kultur_bas,
             "hazir_saat": actual_ready,
             "bosalma_saati": actual_ready,
+            "bagli_makineler": [],
         }
 
         audit_log_list.append({
@@ -813,7 +822,7 @@ def run_scheduler_pipeline(
         schedule = []
 
         # ==============================================================================
-        # KESİNTİSİZ ÇİZELGELEME MOTORU (PARALEL TANK BESLEME & SERT 04:00 KISITI)
+        # KESİNTİSİZ ÇİZELGELEME MOTORU (PARALEL TANK BESLEME & JIT AKIŞ)
         # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
@@ -855,29 +864,19 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
-            # Hazır tankları kontrol et
-            ready_tanks = [
-                (tk, tv) for tk, tv in tanks.items()
-                if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and tv["hazir_saat"] <= current_time
+            # Hazır süt tiplerini kontrol et
+            ready_st_list = [
+                tv["sut_tipi"] for tk, tv in tanks.items()
+                if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
-            matching_orders = []
-            best_t_name = None
-            best_t_info = None
-
-            if ready_tanks:
-                ready_st_list = [tv["sut_tipi"] for tk, tv in ready_tanks]
-                matching_orders = [
-                    o for o in order_pool
-                    if o["rem_ton"] > 0.01 and (
-                        o["makine_hedef"] == chosen_m_name or
-                        (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
-                    ) and o["süt_tipi"] in ready_st_list
-                ]
-                if matching_orders:
-                    st_cand = matching_orders[0]["süt_tipi"]
-                    matched_tk = [t for t in ready_tanks if t[1]["sut_tipi"] == st_cand]
-                    best_t_name, best_t_info = matched_tk[0]
+            matching_orders = [
+                o for o in order_pool
+                if o["rem_ton"] > 0.01 and (
+                    o["makine_hedef"] == chosen_m_name or
+                    (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
+                ) and o["süt_tipi"] in ready_st_list
+            ]
 
             if not matching_orders:
                 matching_orders = [
@@ -889,7 +888,7 @@ def run_scheduler_pipeline(
                 ]
 
             if not matching_orders:
-                m_info["musait_zamani"] = cutoff_0400
+                m_info["musait_zamani"] += datetime.timedelta(minutes=15)
                 continue
 
             pending_o = matching_orders[0]
@@ -900,7 +899,7 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
-            # Makine CIP Kontrolü
+            # Makine CIP Kontrolü (8.5 saatte bir sıralı hat yıkama)
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -913,78 +912,86 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
-            # Eğer hazır süt yoksa, en erken boşalan tankı erkenden JIT doldur
-            if best_t_info is None or best_t_info["mevcut_sut"] <= MIN_SUT_LIMITI_TON:
-                available_tanks = [
-                    (tk, tv) for tk, tv in tanks.items()
-                    if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON
-                ]
-                if available_tanks:
-                    best_t_name, best_t_info = available_tanks[0]
-                    p_start = max(p_start, best_t_info["hazir_saat"])
-                else:
-                    sorted_by_empty = sorted(
-                        tanks.items(),
-                        key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
-                    )
-                    refill_t_name, refill_info = sorted_by_empty[0]
-                    t_bosaldi = refill_info["bosalma_saati"]
+            # PARALEL BESLEME KURALI: 1 Tanktan birden fazla makine aynı anda süt çekebilir
+            matching_tanks = [
+                (tk, tv) for tk, tv in tanks.items()
+                if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
+            ]
 
-                    t_cip_start = max(t_bosaldi, tank_cip_musaitlik)
-                    t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
-                    tank_cip_musaitlik = t_cip_end
-                    refill_info["cip_musait_zaman"] = t_cip_end
+            if matching_tanks:
+                best_t_name, best_t_info = matching_tanks[0]
+                p_start = max(p_start, best_t_info["hazir_saat"])
+            else:
+                # Tank bittiyse JIT olarak doldur (Erken P6 tetikleme)
+                sorted_by_empty = sorted(
+                    tanks.items(),
+                    key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
+                )
+                refill_t_name, refill_info = sorted_by_empty[0]
+                t_bosaldi = refill_info["bosalma_saati"]
 
-                    t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
-                    rem_demand_st = sum(o["rem_ton"] for o in order_pool if o["süt_tipi"] == st_req)
+                t_cip_start = max(t_bosaldi, tank_cip_musaitlik)
+                t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
+                tank_cip_musaitlik = t_cip_end
+                refill_info["cip_musait_zaman"] = t_cip_end
 
-                    fill_amount = min(
-                        TANK_KAPASITELERI[refill_t_name],
-                        round(rem_demand_st, 2),
-                    )
+                t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
+                toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req, MAKINE_LISTESI)
 
-                    if fill_amount <= 1.0:
-                        m_info["musait_zamani"] = cutoff_0400
-                        continue
+                kalan_mesai_saati = max(
+                    0.0,
+                    (cutoff_0400 - (t_p6_start_earliest + datetime.timedelta(hours=1.0 + kultur_suresi))).total_seconds() / 3600.0,
+                )
+                max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
+                rem_demand_st = sum(o["rem_ton"] for o in order_pool if o["süt_tipi"] == st_req)
 
-                    dolum_suresi = fill_amount / p6_debi
-                    t_p6_start_jit = t_p6_start_earliest
+                fill_amount = min(
+                    TANK_KAPASITELERI[refill_t_name],
+                    round(rem_demand_st, 2),
+                    max(0.0, max_uretilebilir),
+                )
 
-                    if p6_state["kumulatif_ton"] + fill_amount > p6_cip_limit:
-                        t_p6_start_jit = max(t_p6_start_jit, t_cip_end) + datetime.timedelta(hours=p6_cip_suresi)
-                        p6_state["kumulatif_ton"] = 0.0
-                        cip_notu += f" | 🧼 P6 {int(p6_cip_limit)}T CIP ({p6_cip_suresi} Sa)"
+                if fill_amount <= 1.0:
+                    m_info["musait_zamani"] = cutoff_0400
+                    continue
 
-                    p6_end = t_p6_start_jit + datetime.timedelta(hours=dolum_suresi)
-                    p6_state["musaitlik"] = p6_end
-                    p6_state["kumulatif_ton"] += fill_amount
+                dolum_suresi = fill_amount / p6_debi
+                t_p6_start_jit = max(
+                    t_p6_start_earliest,
+                    p_start - datetime.timedelta(hours=dolum_suresi + kultur_suresi),
+                )
 
-                    kultur_bas = p6_end
-                    kultur_hazir = kultur_bas + datetime.timedelta(hours=kultur_suresi)
+                if p6_state["kumulatif_ton"] + fill_amount > p6_cip_limit:
+                    t_p6_start_jit = max(t_p6_start_jit, t_cip_end) + datetime.timedelta(hours=p6_cip_suresi)
+                    p6_state["kumulatif_ton"] = 0.0
+                    cip_notu += f" | 🧼 P6 {int(p6_cip_limit)}T CIP ({p6_cip_suresi} Sa)"
 
-                    tanks[refill_t_name]["mevcut_sut"] = fill_amount
-                    tanks[refill_t_name]["sut_tipi"] = st_req
-                    tanks[refill_t_name]["dolum_bitis"] = p6_end
-                    tanks[refill_t_name]["kultur_saati"] = kultur_bas
-                    tanks[refill_t_name]["hazir_saat"] = kultur_hazir
-                    tanks[refill_t_name]["bosalma_saati"] = kultur_hazir
+                p6_end = t_p6_start_jit + datetime.timedelta(hours=dolum_suresi)
+                p6_state["musaitlik"] = p6_end
+                p6_state["kumulatif_ton"] += fill_amount
 
-                    best_t_name = refill_t_name
-                    best_t_info = tanks[refill_t_name]
-                    p_start = max(p_start, kultur_hazir)
-                    cip_notu += f" | 🧼 Tank CIP + P6 Dolum ({round(fill_amount,1)}T)"
+                kultur_bas = p6_end
+                kultur_hazir = kultur_bas + datetime.timedelta(hours=kultur_suresi)
+
+                tanks[refill_t_name]["mevcut_sut"] = fill_amount
+                tanks[refill_t_name]["sut_tipi"] = st_req
+                tanks[refill_t_name]["dolum_bitis"] = p6_end
+                tanks[refill_t_name]["kultur_saati"] = kultur_bas
+                tanks[refill_t_name]["hazir_saat"] = kultur_hazir
+
+                best_t_name = refill_t_name
+                best_t_info = tanks[refill_t_name]
+                p_start = max(p_start, kultur_hazir)
+                cip_notu += f" | 🧼 Tank CIP + P6 Dolum ({round(fill_amount,1)}T)"
 
             if p_start >= cutoff_0400:
                 m_info["musait_zamani"] = cutoff_0400
                 continue
 
-            # SERT 04:00 KISITI: Kalan süreye göre gerçek üretilebilecek miktar
-            kalan_sure_h = max(0.0, (cutoff_0400 - p_start).total_seconds() / 3600.0)
-            max_isleme_kapasitesi = round(kalan_sure_h * hiz, 2)
-
-            chunk_ton = min(pending_o["rem_ton"], best_t_info["mevcut_sut"], max_isleme_kapasitesi)
+            # Tek makine tek seferde mevcut sütü veya siparişi çeker
+            chunk_ton = min(pending_o["rem_ton"], best_t_info["mevcut_sut"])
             if chunk_ton <= MIN_SUT_LIMITI_TON:
-                m_info["musait_zamani"] = cutoff_0400
+                pending_o["rem_ton"] = 0
                 continue
 
             p_dur_h = chunk_ton / hiz
@@ -1057,6 +1064,7 @@ def run_scheduler_pipeline(
                 else:
                     break
 
+        # Arıza Monotonluğu: Arızalı günün toplam çıktısı arızasız baz çıktıyı asla aşamaz
         if is_ariza_gunu and sheet_name in baz_gunluk_uretimler:
             baz_cap = baz_gunluk_uretimler[sheet_name]
             kayip_ton = round((ariza_sure / 60.0) * makine_hizi_getir(ariza_makine, "10000g", "TAM YAĞLI"), 2)
@@ -1753,6 +1761,7 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
 
     with st.form("custom_data_master_form", clear_on_submit=False):
+        # 1. ÜST KISIM: Mevcut Siparişleri Düzenleme ve Silme
         st.write(f"### 📋 1. {edit_day} Günü Mevcut Siparişleri (Sil / Düzenle)")
         
         col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
@@ -1775,6 +1784,7 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
 
         st.markdown("---")
         
+        # 2. ALT KISIM: Yeni Sipariş Ekleme
         st.write(f"### ➕ 2. {edit_day} Gününe Yeni Sipariş Ekle")
         col_n1, col_n2 = st.columns([5, 3])
         with col_n1:
@@ -1901,7 +1911,7 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
             {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
