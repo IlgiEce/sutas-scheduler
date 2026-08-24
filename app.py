@@ -91,7 +91,7 @@ if st.session_state["auth_user"] is None:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
                         st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
-                        sheet_log_kaydet(f"{temiz_isim} [BAŞARISIZ GİRİŞ]")
+                        sheet_log_kaydet(f"'{temiz_isim}' [GEÇERSİZ İSİM GİRİŞİ]")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -114,6 +114,7 @@ if st.session_state["auth_user"] is None:
                     temiz_isim = admin_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
                         st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
+                        sheet_log_kaydet(f"'{temiz_isim}' [YÖNETİCİ GEÇERSİZ İSİM]")
                     elif pin_input != ADMIN_PIN:
                         st.error("❌ Hatalı yönetici kodu!")
                         sheet_log_kaydet(f"{temiz_isim.title()} [HATALI YÖNETİCİ ŞİFRESİ]")
@@ -698,7 +699,8 @@ def run_scheduler_pipeline(
             ariza_aktif=False,
         )
         for g_k, df_b in baz_res["gunluk_cizelgeler"].items():
-            baz_gunluk_uretimler[g_k] = df_b["Miktar (Ton)"].sum() if not df_b.empty else 0.0
+            ham_ad = g_k.split("(")[-1].replace(")", "").strip()
+            baz_gunluk_uretimler[ham_ad] = df_b["Miktar (Ton)"].sum() if not df_b.empty else 0.0
 
     xls = pd.ExcelFile(excel_source)
     baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
@@ -1052,14 +1054,17 @@ def run_scheduler_pipeline(
                 else:
                     break
 
-        gun_baslik_k = f"GÜN {day_idx} ({sheet_name})"
-        if is_ariza_gunu and gun_baslik_k in baz_gunluk_uretimler:
-            baz_cap = baz_gunluk_uretimler[gun_baslik_k]
+        # Arıza Monotonluğu: Arızalı günün toplam çıktısı arızasız baz çıktıyı asla aşamaz
+        if is_ariza_gunu and sheet_name in baz_gunluk_uretimler:
+            baz_cap = baz_gunluk_uretimler[sheet_name]
+            kayip_ton = round((ariza_sure / 60.0) * makine_hizi_getir(ariza_makine, "10000g", "TAM YAĞLI"), 2)
+            hedef_tavan = max(0.0, round(baz_cap - (kayip_ton * 0.70), 2))
+            
             cur_tot = sum(r["Miktar (Ton)"] for r in schedule)
-            if cur_tot > baz_cap:
-                fazlalik = round(cur_tot - baz_cap, 2)
+            if cur_tot > hedef_tavan:
+                fazlalik = round(cur_tot - hedef_tavan, 2)
                 for r_item in reversed(schedule):
-                    if r_item["Miktar (Ton)"] > 0:
+                    if r_item["Miktar (Ton)"] > 0 and r_item["Süt Tipi"] != "DURUŞ":
                         kesinti = min(r_item["Miktar (Ton)"], fazlalik)
                         r_item["Miktar (Ton)"] = round(r_item["Miktar (Ton)"] - kesinti, 2)
                         fazlalik = round(fazlalik - kesinti, 2)
@@ -1562,15 +1567,18 @@ with st.sidebar:
     else:
         st.markdown(f"👤 **Giriş Yapan:** `{st.session_state['auth_user']}`")
         with st.expander("🔑 **Yönetici Moduna Geç**", expanded=False):
-            elevate_pin = st.text_input("4 Haneli Kod:", type="password", max_chars=4, key="elevate_pin_input")
-            if st.button("Yetkiyi Yükselt 🔓", key="btn_elevate", use_container_width=True):
-                if elevate_pin == ADMIN_PIN:
-                    st.session_state["is_admin"] = True
-                    st.session_state["auth_user"] = f"{st.session_state['auth_user']} (Yönetici)"
-                    sheet_log_kaydet(f"{st.session_state['auth_user']} [Mod Yükseltme]")
-                    st.rerun()
-                else:
-                    st.error("❌ Hatalı PIN!")
+            with st.form("sidebar_elevate_form", clear_on_submit=False):
+                elevate_pin = st.text_input("4 Haneli Kod:", type="password", max_chars=4, key="elevate_pin_input")
+                btn_elevate = st.form_submit_button("Yetkiyi Yükselt 🔓 ↵", use_container_width=True, type="primary")
+                if btn_elevate:
+                    if elevate_pin == ADMIN_PIN:
+                        st.session_state["is_admin"] = True
+                        st.session_state["auth_user"] = f"{st.session_state['auth_user']} (Yönetici)"
+                        sheet_log_kaydet(f"{st.session_state['auth_user']} [Mod Yükseltme]")
+                        st.rerun()
+                    else:
+                        st.error("❌ Hatalı PIN!")
+                        sheet_log_kaydet(f"{st.session_state['auth_user']} [SIDEBAR HATALI PIN]")
 
     st.markdown("---")
 
@@ -1733,7 +1741,7 @@ with st.sidebar:
     )
 
 # ==============================================================================
-# HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
+# HAM VERİ DÜZENLEME EKRANI (ÜSTTE SİLME, ALTTA EKLEME - ATOMİK FORM)
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
@@ -1742,35 +1750,16 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
 
-    st.markdown(f"#### ➕ {edit_day} Gününe Yeni Sipariş Ekle")
-    col_n1, col_n2, col_n3 = st.columns([5, 3, 2])
-    with col_n1:
-        new_p_name = st.selectbox("Ürün Seçiniz:", options=["(Ürün Seçin)"] + URUN_KATALOGU, key=f"sel_p_{edit_day}")
-    with col_n2:
-        new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0, key=f"sel_qty_{edit_day}")
-    with col_n3:
-        st.write("")
-        st.write("")
-        if st.button("➕ Siparişi Ekle", key=f"btn_add_{edit_day}", use_container_width=True, type="primary"):
-            if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
-                st.session_state["custom_factory_data"][edit_day].append((new_p_name.strip(), float(new_p_qty)))
-                st.session_state["results"] = None
-                st.success(f"✅ {new_p_name} ({new_p_qty} Lt) başarıyla eklendi!")
-                st.rerun()
-            else:
-                st.warning("Lütfen geçerli bir ürün ve miktar belirtin.")
-
-    st.markdown("---")
-
-    with st.form("custom_data_edit_form"):
-        st.write(f"### 📋 {edit_day} Günü Mevcut Siparişleri")
+    with st.form("custom_data_master_form", clear_on_submit=False):
+        # 1. ÜST KISIM: Mevcut Siparişleri Düzenleme ve Silme
+        st.write(f"### 📋 1. {edit_day} Günü Mevcut Siparişleri (Sil / Düzenle)")
         
-        updated_day_list = []
         col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
         col_h1.markdown("**Ürün Açıklaması**")
         col_h2.markdown("**Süt Miktarı (Lt) ✏️**")
         col_h3.markdown("**Siparişi Sil 🗑️**")
 
+        updated_day_list = []
         for idx, (p_name, p_qty) in enumerate(current_day_orders):
             c1, c2, c3 = st.columns([5, 3, 2])
             with c1:
@@ -1784,12 +1773,26 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
                 updated_day_list.append((name_val.strip(), float(qty_val)))
 
         st.markdown("---")
-        confirm_btn = st.form_submit_button("💾 Güncellemeleri Kaydet ve Onayla", type="primary", use_container_width=True)
+        
+        # 2. ALT KISIM: Yeni Sipariş Ekleme
+        st.write(f"### ➕ 2. {edit_day} Gününe Yeni Sipariş Ekle")
+        col_n1, col_n2 = st.columns([5, 3])
+        with col_n1:
+            new_p_name = st.selectbox("Eklenecek Ürünü Seçiniz:", options=["(Ürün Seçin)"] + URUN_KATALOGU, key=f"sel_p_{edit_day}")
+        with col_n2:
+            new_p_qty = st.number_input("Eklenecek Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0, key=f"sel_qty_{edit_day}")
 
-        if confirm_btn:
+        st.markdown("---")
+        master_save_btn = st.form_submit_button("💾 Tüm Değişiklikleri ve Yeni Siparişi Onayla & Kaydet", type="primary", use_container_width=True)
+
+        if master_save_btn:
+            # Yeni sipariş seçildiyse listeye dahil et
+            if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
+                updated_day_list.append((new_p_name.strip(), float(new_p_qty)))
+            
             st.session_state["custom_factory_data"][edit_day] = updated_day_list
-            st.session_state["results"] = None
-            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi!")
+            st.session_state["results"] = None  # Yeni siparişin simülasyona girmesi için önbelleği sıfırla
+            st.success(f"✅ {edit_day} günü siparişleri ve yeni eklemeler başarıyla kaydedildi! Sol menüden 'Senaryoyu Hesapla' butonuna basabilirsiniz.")
             st.rerun()
 
     st.markdown("---")
@@ -1898,8 +1901,8 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
