@@ -553,6 +553,7 @@ def gunluk_tank_hazirligi_v80(
                 "kultur_saati": gun_baslangic - datetime.timedelta(hours=kultur_suresi),
                 "hazir_saat": gun_baslangic,
                 "bosalma_saati": gun_baslangic,
+                "bagli_makineler": [],
             }
             audit_log_list.append({
                 "Gün": f"GÜN {day_idx} ({day_name})",
@@ -569,6 +570,7 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
+    # Gece hazırlığı: Erken boşalan tankları P6'ya öne alarak sabah 08:00'e yetiştirme
     sorted_tanks = sorted(
         tank_list,
         key=lambda item: tank_states.get(item[0], {}).get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)),
@@ -621,6 +623,7 @@ def gunluk_tank_hazirligi_v80(
             "kultur_saati": kultur_bas,
             "hazir_saat": actual_ready,
             "bosalma_saati": actual_ready,
+            "bagli_makineler": [],
         }
 
         audit_log_list.append({
@@ -818,6 +821,9 @@ def run_scheduler_pipeline(
 
         schedule = []
 
+        # ==============================================================================
+        # KESİNTİSİZ ÇİZELGELEME MOTORU (PARALEL TANK BESLEME & JIT AKIŞ)
+        # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
             for m_name in MAKINE_LISTESI:
@@ -846,12 +852,11 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
+            # Anlık aktif çalışan hat sayısı kısıtı (Maks 5)
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
             )
-            max_allowed = 5
-
-            if active_count >= max_allowed:
+            if active_count >= 5:
                 future_ends = [
                     item[1] for m in MAKINE_LISTESI for item in machines[m]["calisma_araliklari"] if item[1] > current_time
                 ]
@@ -859,6 +864,7 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
+            # Hazır süt tiplerini kontrol et
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -893,6 +899,7 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
+            # Makine CIP Kontrolü (8.5 saatte bir sıralı hat yıkama)
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -905,6 +912,7 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
+            # PARALEL BESLEME KURALI: 1 Tanktan birden fazla makine aynı anda süt çekebilir
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
                 if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -914,6 +922,7 @@ def run_scheduler_pipeline(
                 best_t_name, best_t_info = matching_tanks[0]
                 p_start = max(p_start, best_t_info["hazir_saat"])
             else:
+                # Tank bittiyse JIT olarak doldur (Erken P6 tetikleme)
                 sorted_by_empty = sorted(
                     tanks.items(),
                     key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
@@ -979,6 +988,7 @@ def run_scheduler_pipeline(
                 m_info["musait_zamani"] = cutoff_0400
                 continue
 
+            # Tek makine tek seferde mevcut sütü veya siparişi çeker
             chunk_ton = min(pending_o["rem_ton"], best_t_info["mevcut_sut"])
             if chunk_ton <= MIN_SUT_LIMITI_TON:
                 pending_o["rem_ton"] = 0
@@ -1786,12 +1796,11 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
         master_save_btn = st.form_submit_button("💾 Tüm Değişiklikleri ve Yeni Siparişi Onayla & Kaydet", type="primary", use_container_width=True)
 
         if master_save_btn:
-            # Yeni sipariş seçildiyse listeye dahil et
             if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
                 updated_day_list.append((new_p_name.strip(), float(new_p_qty)))
             
             st.session_state["custom_factory_data"][edit_day] = updated_day_list
-            st.session_state["results"] = None  # Yeni siparişin simülasyona girmesi için önbelleği sıfırla
+            st.session_state["results"] = None
             st.success(f"✅ {edit_day} günü siparişleri ve yeni eklemeler başarıyla kaydedildi! Sol menüden 'Senaryoyu Hesapla' butonuna basabilirsiniz.")
             st.rerun()
 
@@ -1901,8 +1910,8 @@ if st.session_state["results"] is not None:
             {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
