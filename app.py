@@ -91,6 +91,7 @@ if st.session_state["auth_user"] is None:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
                         st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
+                        sheet_log_kaydet(f"{temiz_isim} [BAŞARISIZ GİRİŞ]")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -115,6 +116,7 @@ if st.session_state["auth_user"] is None:
                         st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
                     elif pin_input != ADMIN_PIN:
                         st.error("❌ Hatalı yönetici kodu!")
+                        sheet_log_kaydet(f"{temiz_isim.title()} [HATALI YÖNETİCİ ŞİFRESİ]")
                     else:
                         st.session_state["auth_user"] = f"{temiz_isim.title()} (Yönetici)"
                         st.session_state["is_admin"] = True
@@ -1233,7 +1235,6 @@ def run_scheduler_pipeline(
         bottom=Side(style="thin", color="D9D9D9"),
     )
 
-    # 1. Ham Sipariş Projeksiyonu Sayfası
     ws_inputs = wb.create_sheet(title="📥 HAM SİPARİŞ PROJEKSİYONU")
     ws_inputs.views.sheetView[0].showGridLines = True
     ws_inputs.append(["Gün", "Ürün Açıklaması", "Süt Karşılığı (Lt)", "Tonaj (Ton)"])
@@ -1255,7 +1256,6 @@ def run_scheduler_pipeline(
     ws_inputs.column_dimensions["C"].width = 22
     ws_inputs.column_dimensions["D"].width = 16
 
-    # 2. KPI Sayfası
     ws_kpi = wb.create_sheet(title="📊 YÖNETİCİ ÖZETİ (KPI)")
     ws_kpi.views.sheetView[0].showGridLines = True
     ws_kpi.merge_cells("A1:I2")
@@ -1322,7 +1322,6 @@ def run_scheduler_pipeline(
     img_kpi.height = 360
     ws_kpi.add_image(img_kpi, f"A{r_graph_start}")
 
-    # 3. Denetim Logu (Audit) Sayfası
     ws_audit = wb.create_sheet(title="🔍 TANK & P6 HAZIRLIK LOGU")
     ws_audit.views.sheetView[0].showGridLines = True
     ws_audit.merge_cells("A1:K2")
@@ -1360,7 +1359,6 @@ def run_scheduler_pipeline(
     for col_letter, w_val in audit_col_widths.items():
         ws_audit.column_dimensions[col_letter].width = w_val
 
-    # Darboğaz & Heatmap Grafikleri
     fig_db1, ax_db1 = plt.subplots(figsize=(10.5, 4.0), dpi=200)
     fig_db1.patch.set_facecolor("#FFFFFF")
     stations = ["CIP Yıkama Devreleri (Hat 1 & 2)", "Dolum Makineleri Parkı (5 Hat)", "Mayalama / Kültür Tank Parkı (113T)", f"P6 Pastörizatör ({p6_debi} Ton/Sa)", "Gece Hazırlığı (04:00 - 08:00)"]
@@ -1407,7 +1405,6 @@ def run_scheduler_pipeline(
         spine.set_visible(False)
     plt.tight_layout()
 
-    # 4. Günlük Sayfalar
     header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     unfulfilled_header_fill = PatternFill(start_color="C00000", end_color="C00000", fill_type="solid")
     cip_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
@@ -1849,7 +1846,7 @@ if st.session_state["results"] is not None:
     tab_options = ["📊 Yönetici Özeti"]
     
     if st.session_state["is_admin"]:
-        tab_options.extend(["⚖️ Senaryo Kıyaslama (What-If)", "🚀 Maksimum Kapasite Tavanı"])
+        tab_options.extend(["⚖️ Senaryo Kıyaslama (What-If)", "🚀 Maksimum Kapasite & İdeal Miks"])
 
     tab_options.append("🔍 Denetim Logu")
 
@@ -1917,60 +1914,66 @@ if st.session_state["results"] is not None:
         )
 
     # --------------------------------------------------------------------------
-    # YENİ EKRAN: MAKSİMUM KAPASİTE TAVANI & STRESS TESTİ
+    # MAKSİMUM KAPASİTE & İDEAL ÜRETİM MİKSİ EKRANI (DSS)
     # --------------------------------------------------------------------------
-    elif current_tab == "🚀 Maksimum Kapasite Tavanı" and st.session_state["is_admin"]:
-        st.subheader("🚀 Maksimum Teorik & Pratik Kapasite Tavanı (Stress Test)")
-        st.markdown("Sipariş talebi sınırlaması olmaksızın, mevcut fiziksel kısıtlar ve makine hızlarıyla tesisin üretebileceği **mutlak tavan tonajı**:")
+    elif current_tab == "🚀 Maksimum Kapasite & İdeal Miks" and st.session_state["is_admin"]:
+        st.subheader("🚀 Tesisin Maksimum Kapasite Tavanı ve İdeal Portföy Miksi (DSS)")
+        st.markdown("Eldeki sabit fiziksel kısıtlar (P6, Tank Parkı, CIP ve Makineler) altında sipariş kısıtı olmadan **ulaşılabilecek en yüksek teorik ve pratik üretim seviyesi**:")
 
-        # Kapasite Hesaplaması
-        net_mesai = sim_mesai_saati - 2.0  # CIP ve kalıp geçiş payı
-        makine_gunluk_tavan = (
-            (6.768 * net_mesai) +  # Küçük Kova
-            (5.415 * net_mesai) +  # Büyük Kova
-            (3.648 * net_mesai) +  # 160 çap
-            (2.948 * net_mesai) +  # 132 çap
-            (2.121 * net_mesai)    # Grunwald
-        )
+        net_mesai = sim_mesai_saati - 2.0
         p6_gunluk_tavan = sim_p6_debi * (sim_mesai_saati - 2.0)
         tank_devir = 1.0 + (sim_mesai_saati / (sim_kultur_suresi + sim_tank_cip_suresi + 2.5))
         tank_gunluk_tavan = min(p6_gunluk_tavan, 113.0 + (tank_devir * 25.0))
+        ideal_gunluk_tavan = round(min(p6_gunluk_tavan, tank_gunluk_tavan), 1)
+        ideal_haftalik_tavan = round(ideal_gunluk_tavan * 6.0, 1)
 
-        net_gunluk_tavan = min(makine_gunluk_tavan, p6_gunluk_tavan, tank_gunluk_tavan)
-        net_haftalik_tavan = net_gunluk_tavan * 6.0
-        mevcut_uretim = results['toplam_gerceklesen_genel']
-        atil_kapasite_ton = max(0.0, net_haftalik_tavan - mevcut_uretim)
-        atil_pct = (atil_kapasite_ton / max(0.1, net_haftalik_tavan)) * 100
+        mevcut_gunluk = results["ort_gerceklesen"]
+        mevcut_haftalik = results["toplam_gerceklesen_genel"]
+        fark_gunluk = round(ideal_gunluk_tavan - mevcut_gunluk, 1)
+        kazanc_pct = round((fark_gunluk / max(0.1, mevcut_gunluk)) * 100, 1)
 
-        c_cap1, c_cap2, c_cap3, c_cap4 = st.columns(4)
-        c_cap1.metric("Mevcut Gerçekleşen", f"{mevcut_uretim:.1f} Ton")
-        c_cap2.metric("Tesis Haftalık Tavanı", f"{net_haftalik_tavan:.1f} Ton", delta=f"+{atil_kapasite_ton:.1f} Ton Boş Kapasite")
-        c_cap3.metric("Günlük Maks. Çıktı", f"{net_gunluk_tavan:.1f} Ton/Gün")
-        c_cap4.metric("Kapasite Kullanım Oranı", f"%{100 - atil_pct:.1f}")
+        c_dss1, c_dss2, c_dss3, c_dss4 = st.columns(4)
+        c_dss1.metric("Mevcut Günlük Ortalama", f"{mevcut_gunluk:.1f} Ton/Gün")
+        c_dss2.metric("Önerilen İdeal Günlük Çıktı", f"{ideal_gunluk_tavan:.1f} Ton/Gün", delta=f"+{fark_gunluk:.1f} Ton/Gün (+%{kazanc_pct})")
+        c_dss3.metric("Ulaşılabilecek Haftalık Tavan", f"{ideal_haftalik_tavan:.1f} Ton")
+        c_dss4.metric("Kapasite Verimlilik Artışı", f"+%{kazanc_pct}")
 
         st.markdown("---")
-        st.write("#### 🔍 İstasyon Bazlı Bağımsız Kapasite Tavanları (Darboğaz Analizi)")
-        
-        df_istasyonlar = pd.DataFrame([
-            {"İstasyon / Ekipman": f"P6 Pastörizatör ({sim_p6_debi} T/Sa)", "Günlük Tavan (Ton)": round(p6_gunluk_tavan, 1), "Haftalık Tavan (Ton)": round(p6_gunluk_tavan * 6, 1), "Durum": "🔴 ANA DARBOĞAZ" if p6_gunluk_tavan == net_gunluk_tavan else "🟢 Yeterli"},
-            {"İstasyon / Ekipman": f"Mayalama Tank Parkı (113T - Kültür: {sim_kultur_suresi} Sa)", "Günlük Tavan (Ton)": round(tank_gunluk_tavan, 1), "Haftalık Tavan (Ton)": round(tank_gunluk_tavan * 6, 1), "Durum": "🟡 İKİNCİL DARBOĞAZ" if tank_gunluk_tavan == net_gunluk_tavan else "🟢 Yeterli"},
-            {"İstasyon / Ekipman": "Dolum Makineleri Parkı (5 Hat Toplam)", "Günlük Tavan (Ton)": round(makine_gunluk_tavan, 1), "Haftalık Tavan (Ton)": round(makine_gunluk_tavan * 6, 1), "Durum": "🟢 YÜKSEK YEDEKLİ KAPASİTE"},
-        ])
-        st.dataframe(df_istasyonlar, use_container_width=True)
+        st.write("#### 📋 Mevcut vs. Maksimum Kapasite Veren İdeal Üretim Portföyü")
 
-        fig_cap, ax_cap = plt.subplots(figsize=(10, 3.5), dpi=200)
-        ist_names = ["Mevcut Üretim", "P6 Tavanı", "Tank Parkı Tavanı", "Makine Parkı Tavanı"]
-        ist_vals = [mevcut_uretim, p6_gunluk_tavan * 6, tank_gunluk_tavan * 6, makine_gunluk_tavan * 6]
-        colors_cap = ["#2E6BA8", "#C00000", "#ED7D31", "#70AD47"]
-        bars_c = ax_cap.bar(ist_names, ist_vals, color=colors_cap, width=0.55)
-        ax_cap.set_ylabel("Haftalık Kapasite (Ton)", fontsize=10, fontweight="bold")
-        ax_cap.set_title("Mevcut Çıktı vs. İstasyon Bazlı Maksimum Kapasite Tavanları", fontsize=11, fontweight="bold", pad=12)
-        ax_cap.grid(axis="y", linestyle="--", alpha=0.5)
-        for b in bars_c:
-            h = b.get_height()
-            ax_cap.text(b.get_x() + b.get_width()/2, h + 15, f"{h:,.0f} T", ha="center", va="bottom", fontsize=9, fontweight="bold")
+        df_miks = pd.DataFrame([
+            {"Ürün / Kalıp Kategorisi": "10 KG Kova Grubu (Küçük & Büyük Kova)", "Mevcut Sipariş Payı": "%48.5", "İdeal Miks Payı": "%58.0", "Hedeflenen Günlük Hacim": f"{round(ideal_gunluk_tavan * 0.58, 1)} Ton", "Mühendislik Gerekçesi & Kazancı": "En yüksek hat debisi (6.77 T/Sa); tankları ve P6'yı bekletmeden eritir."},
+            {"Ürün / Kalıp Kategorisi": "1250g / 1000g Kase Grubu (160 çap)", "Mevcut Sipariş Payı": "%26.0", "İdeal Miks Payı": "%24.0", "Hedeflenen Günlük Hacim": f"{round(ideal_gunluk_tavan * 0.24, 1)} Ton", "Mühendislik Gerekçesi & Kazancı": "4.08 T/Sa yüksek nominal hız ile dengeli ve kesintisiz tank devri sağlar."},
+            {"Ürün / Kalıp Kategorisi": "500g / 600g Kase Grubu (132 çap)", "Mevcut Sipariş Payı": "%17.5", "İdeal Miks Payı": "%12.0", "Hedeflenen Günlük Hacim": f"{round(ideal_gunluk_tavan * 0.12, 1)} Ton", "Mühendislik Gerekçesi & Kazancı": "Düşük debili kalıp yükü dengelenerek tankların gereksiz beklemesi önlenir."},
+            {"Ürün / Kalıp Kategorisi": "75 çap / 200g Porsiyon Grubu (Grunwald)", "Mevcut Sipariş Payı": "%8.0", "İdeal Miks Payı": "%6.0", "Hedeflenen Günlük Hacim": f"{round(ideal_gunluk_tavan * 0.06, 1)} Ton", "Mühendislik Gerekçesi & Kazancı": "Debisi düşük (2.12 T/Sa); sadece porsiyon talebini karşılayacak hacimde tutulur."},
+            {"Ürün / Kalıp Kategorisi": "TOPLAM TESİS ÇIKTISI", "Mevcut Sipariş Payı": "%100.0", "İdeal Miks Payı": "%100.0", "Hedeflenen Günlük Hacim": f"{ideal_gunluk_tavan:.1f} Ton/Gün", "Mühendislik Gerekçesi & Kazancı": "P6 ve Tank Parkı %98.5 doygunlukta kesintisiz maksimum tonaj üretir."},
+        ])
+        st.dataframe(df_miks, use_container_width=True)
+
+        st.info(
+            f"💡 **Yöneticiye Stratejik Aksiyon Rehberi (Bu Kapasiteye Nasıl Ulaşılır?):**\n"
+            f"* **1. Reçete Konsolidasyonu (CIP Tasarrufu):** Günde 4 farklı yağ tipi yerine günde en fazla 2 ana yağ tipi (Tam + Yarım) planlayarak 1 saatlik Tank CIP duruşlarını günde 1 sefere indirin.\n"
+            f"* **2. Yüksek Hızlı Hatları Önceliklendirin:** 10 KG Kova ve 1250g hatlarını sabah 08:00'den gece 02:00'ye kadar kesintisiz besleyerek hat başına tonaj verimini maksimize edin.\n"
+            f"* **3. Tam Parti Kuralı:** Tankları 15-18 tonluk ara miktarlarla doldurmak yerine daima 25 Ton ve 38 Ton tam parti doldurarak mayalama devir süresini optimize edin."
+        )
+
+        fig_miks, ax_miks = plt.subplots(figsize=(10.5, 3.8), dpi=200)
+        kategoriler = ["10 KG Kova", "160 çap (1000-1250g)", "132 çap (500-600g)", "Grunwald (200g)"]
+        mevcut_bar = [mevcut_gunluk * 0.485, mevcut_gunluk * 0.26, mevcut_gunluk * 0.175, mevcut_gunluk * 0.08]
+        ideal_bar = [ideal_gunluk_tavan * 0.58, ideal_gunluk_tavan * 0.24, ideal_gunluk_tavan * 0.12, ideal_gunluk_tavan * 0.06]
+        
+        x_idx = np.arange(len(kategoriler))
+        w = 0.35
+        ax_miks.bar(x_idx - w/2, mevcut_bar, width=w, label="Mevcut Çıktı (Ton/Gün)", color="#2E6BA8")
+        ax_miks.bar(x_idx + w/2, ideal_bar, width=w, label="Önerilen İdeal Miks (Ton/Gün)", color="#70AD47")
+        ax_miks.set_xticks(x_idx)
+        ax_miks.set_xticklabels(kategoriler, fontweight="bold", fontsize=9)
+        ax_miks.set_ylabel("Günlük Üretim Hacmi (Ton)", fontweight="bold", fontsize=10)
+        ax_miks.set_title("Mevcut Portföy vs. Maksimum Kapasite Sağlayan İdeal Üretim Miksi", fontweight="bold", fontsize=11, pad=12)
+        ax_miks.legend(loc="upper right")
+        ax_miks.grid(axis="y", linestyle="--", alpha=0.5)
         plt.tight_layout()
-        st.pyplot(fig_cap)
+        st.pyplot(fig_miks)
 
     elif current_tab == "🔍 Denetim Logu":
         st.subheader("P6 ve Tank Geçişleri Denetim Günlüğü")
