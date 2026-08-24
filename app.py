@@ -589,10 +589,8 @@ def gunluk_tank_hazirligi_v80(
         dolum_h = cap / p6_debi
         t_ideal_p6_start = gun_baslangic - datetime.timedelta(hours=dolum_h + kultur_suresi)
         
-        # P6 başlama anı: Tank CIP bitmiş olmalı ve P6 boş olmalı
         t_p6_earliest = max(t_cip_done, current_p6_time)
         
-        # 08:00'den çok önce boşta beklemeyi önlemek için ideal saat ile harmanlama
         if t_p6_earliest < t_ideal_p6_start:
             t_p6_start = t_ideal_p6_start
             p6_kuyruk_dk = 0
@@ -832,7 +830,7 @@ def run_scheduler_pipeline(
         schedule = []
 
         # ==============================================================================
-        # KESİNTİSİZ ÇİZELGELEME MOTORU (PARALEL TANK BESLEME & JIT AKIŞ)
+        # KESİNTİSİZ ÇİZELGELEME MOTORU (PARALEL TANK BESLEME & KOVA YÜK DENGELEME)
         # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
@@ -857,7 +855,13 @@ def run_scheduler_pipeline(
             if not candidate_actions:
                 break
 
-            candidate_actions.sort(key=lambda x: x[1])
+            # KOVA YÜK DENGELEME: Önce erken boşalan makine, eşitlikte ise hızlı olan (Küçük Kova) seçilir
+            candidate_actions.sort(
+                key=lambda x: (
+                    x[1],
+                    -makine_hizi_getir(x[0], "10000g", "TAM YAĞLI")
+                )
+            )
             chosen_m_name = candidate_actions[0][0]
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
@@ -929,7 +933,6 @@ def run_scheduler_pipeline(
             ]
 
             if matching_tanks:
-                # En erken hazır olan tankı seç
                 matching_tanks.sort(key=lambda x: x[1]["hazir_saat"])
                 best_t_name, best_t_info = matching_tanks[0]
                 p_start = max(p_start, best_t_info["hazir_saat"])
