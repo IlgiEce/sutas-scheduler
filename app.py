@@ -76,7 +76,6 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    # Sayfa ortasında derli toplu giriş kartı
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     
     with col_l2:
@@ -1025,11 +1024,11 @@ def run_scheduler_pipeline(
                 "dt_start": p_start,
                 "dt_end": p_end,
                 "gun_adi": sheet_name,
+                "op_count": isgucu_katsayisi_getir(chosen_m_name, g_req),
             }
             schedule.append(satir_verisi)
             all_schedule_rows.append(satir_verisi)
 
-            op_count = isgucu_katsayisi_getir(chosen_m_name, g_req)
             cur_t = p_start
             while cur_t < p_end:
                 h_idx = int((cur_t - gun_baslangic).total_seconds() // 3600)
@@ -1037,10 +1036,31 @@ def run_scheduler_pipeline(
                     next_hour = gun_baslangic + datetime.timedelta(hours=h_idx + 1)
                     work_in_this_hour = (min(p_end, next_hour) - cur_t).total_seconds() / 3600.0
                     haftalik_saatlik_is_yuku[chosen_m_name][h_idx] += round(work_in_this_hour * hiz, 2)
-                    gunluk_saatlik_isgucu[sheet_name][h_idx] += op_count * work_in_this_hour
                     cur_t = min(p_end, next_hour)
                 else:
                     break
+
+        # Dinamik Çapraz İşgücü & Havuz Seviyelendirme (Rotasyon Hesabı)
+        for h_i in range(mesai_h):
+            t_slot_start = gun_baslangic + datetime.timedelta(hours=h_i)
+            t_slot_end = gun_baslangic + datetime.timedelta(hours=h_i + 1)
+            
+            # Bu 1 saatlik dilimde çalışan makineler ve anlık operatör ihtiyacı
+            active_machines_in_hour = []
+            for s_row in schedule:
+                if s_row.get("dt_start") and s_row.get("dt_end"):
+                    if max(s_row["dt_start"], t_slot_start) < min(s_row["dt_end"], t_slot_end):
+                        active_machines_in_hour.append(s_row["op_count"])
+            
+            # Çapraz rotasyon: Eşzamanlı çalışan hatların operatörleri paylaşması
+            if active_machines_in_hour:
+                max_hat_op = max(active_machines_in_hour)
+                ek_hatlar_op = sum(active_machines_in_hour) - max_hat_op
+                # Çapraz operatör desteği ile hatlar arası sinerji faktörü (%75 verimlilikle paylaşım)
+                net_gereken_insan = max_hat_op + (ek_hatlar_op * 0.75)
+                gunluk_saatlik_isgucu[sheet_name][h_i] = round(net_gereken_insan, 1)
+            else:
+                gunluk_saatlik_isgucu[sheet_name][h_i] = 0.0
 
         if is_ariza_gunu:
             bakim_satiri = {
@@ -1385,7 +1405,7 @@ def run_scheduler_pipeline(
         ws_d = wb.create_sheet(title=sheet_title)
         ws_d.views.sheetView[0].showGridLines = True
         display_cols = (
-            [c for c in df_detail.columns if c not in ["dt_start", "dt_end", "gun_adi"]]
+            [c for c in df_detail.columns if c not in ["dt_start", "dt_end", "gun_adi", "op_count"]]
             if not df_detail.empty
             else ["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Tahsis Tank", "Makine", "Kalıp/Gramaj", "Hız (T/Sa)", "Başlangıç", "Bitiş", "04:00 Hedefi", "Kültür & CIP Hijyen Notu"]
         )
@@ -1515,7 +1535,6 @@ st.title("🏭 Sütaş Karacabey Master Scheduler & DSS")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
-    # 🏠 ANASAYFAYA DÖN / SIFIRLA BUTONU
     if st.button("🏠 Anasayfa & Varsayılana Dön", use_container_width=True, type="secondary"):
         varsayilana_sifirla()
 
@@ -1556,11 +1575,10 @@ with st.sidebar:
         uploaded_file = st.file_uploader("Projeksiyon Excel Dosyası Seçin (.xlsx)", type=["xlsx"])
         if uploaded_file is not None:
             active_excel_source = uploaded_file
-    elif veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
-        active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
     else:
         active_excel_source = create_excel_stream_from_dict(st.session_state["custom_factory_data"])
-        st.success("✅ Sütaş Karacabey 6 günlük fabrika projeksiyonu aktif.")
+        if veri_secenegi == "Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)":
+            st.success("✅ Sütaş Karacabey 6 günlük fabrika projeksiyonu aktif.")
 
     st.markdown("---")
 
@@ -1707,13 +1725,35 @@ with st.sidebar:
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
-    st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini doğrudan değiştirebilir veya ürün listesinden yeni sipariş ekleyebilirsiniz:")
+    st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini değiştirebilir veya doğrudan yeni sipariş ekleyebilirsiniz:")
 
     edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
 
+    # 1. Yeni Sipariş Ekleme Alanı (Form dışı - Anında Belleğe Yazar)
+    st.markdown(f"#### ➕ {edit_day} Gününe Yeni Sipariş Ekle")
+    col_n1, col_n2, col_n3 = st.columns([5, 3, 2])
+    with col_n1:
+        new_p_name = st.selectbox("Ürün Seçiniz:", options=["(Ürün Seçin)"] + URUN_KATALOGU, key=f"sel_p_{edit_day}")
+    with col_n2:
+        new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0, key=f"sel_qty_{edit_day}")
+    with col_n3:
+        st.write("")
+        st.write("")
+        if st.button("➕ Siparişi Ekle", key=f"btn_add_{edit_day}", use_container_width=True, type="primary"):
+            if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
+                st.session_state["custom_factory_data"][edit_day].append((new_p_name.strip(), float(new_p_qty)))
+                st.session_state["results"] = None
+                st.success(f"✅ {new_p_name} ({new_p_qty} Lt) başarıyla eklendi!")
+                st.rerun()
+            else:
+                st.warning("Lütfen geçerli bir ürün ve miktar belirtin.")
+
+    st.markdown("---")
+
+    # 2. Mevcut Siparişler Tablosu ve Düzenleme Formu
     with st.form("custom_data_edit_form"):
-        st.write(f"### 📋 {edit_day} Günü Sipariş Listesi")
+        st.write(f"### 📋 {edit_day} Günü Mevcut Siparişleri")
         
         updated_day_list = []
         col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
@@ -1734,22 +1774,12 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
                 updated_day_list.append((name_val.strip(), float(qty_val)))
 
         st.markdown("---")
-        st.markdown("**➕ Bu Güne Yeni Sipariş Ekle (Ürün Seçimi):**")
-        col_n1, col_n2 = st.columns([5, 3])
-        with col_n1:
-            new_p_name = st.selectbox("Ürün Seçiniz:", options=["(Ürün Seçin)"] + URUN_KATALOGU, key=f"select_new_p_{edit_day}")
-        with col_n2:
-            new_p_qty = st.number_input("Süt Miktarı (Lt):", min_value=0.0, step=500.0, value=0.0, key=f"select_new_qty_{edit_day}")
-
-        if new_p_name != "(Ürün Seçin)" and new_p_qty > 0:
-            updated_day_list.append((new_p_name.strip(), float(new_p_qty)))
-
-        st.markdown("---")
-        confirm_btn = st.form_submit_button("💾 Değişiklikleri Onayla & Üretim Planına Aktar", type="primary", use_container_width=True)
+        confirm_btn = st.form_submit_button("💾 Güncellemeleri Kaydet ve Onayla", type="primary", use_container_width=True)
 
         if confirm_btn:
             st.session_state["custom_factory_data"][edit_day] = updated_day_list
-            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi! Aşağıdaki butona basarak yeni planı optimize edebilirsiniz.")
+            st.session_state["results"] = None
+            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi!")
             st.rerun()
 
     st.markdown("---")
@@ -1762,7 +1792,7 @@ if "results" not in st.session_state:
 
 if active_excel_source is not None:
     if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run", use_container_width=True):
-        with st.spinner("Matematiksel kısıtlar, arızalar ve güncel siparişler hesaplanıyor..."):
+        with st.spinner("Matematiksel kısıtlar, rotasyonlar ve siparişler hesaplanıyor..."):
             st.session_state["results"] = run_scheduler_pipeline(
                 excel_source=active_excel_source,
                 p6_debi=sim_p6_debi,
@@ -1883,7 +1913,7 @@ if st.session_state["results"] is not None:
         st.pyplot(results["fig_hm"])
 
     elif current_tab == "👥 İşgücü Analizi" and st.session_state["is_admin"]:
-        st.subheader("İşgücü İhtiyacı Seviyelendirme Analizi")
+        st.subheader("İşgücü İhtiyacı Seviyelendirme & Çapraz Rotasyon Analizi")
         isgucu_secenekleri = ["📊 Haftalık Genel Ortalama"] + list(results["gunluk_saatlik_isgucu"].keys())
         secilen_isgucu_gorunumu = st.selectbox("İşgücü Görünümü Seçin:", isgucu_secenekleri)
 
@@ -1896,10 +1926,10 @@ if st.session_state["results"] is not None:
                 for h_i, val in enumerate(g_vals):
                     toplam_saatlik[h_i] += val
             gosterilecek_isgucu = [round(v / max(1, results["gun_sayisi"]), 1) for v in toplam_saatlik]
-            grafik_baslik = "Haftalık Ortalama Saatlik İşgücü İhtiyacı (Kişi / Saat)"
+            grafik_baslik = "Haftalık Ortalama Saatlik İşgücü İhtiyacı (Kişi / Saat - Çapraz Rotasyonlu)"
         else:
             gosterilecek_isgucu = [round(v, 1) for v in results["gunluk_saatlik_isgucu"][secilen_isgucu_gorunumu]]
-            grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat)"
+            grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat - Çapraz Rotasyonlu)"
 
         peak_val = max(gosterilecek_isgucu) if gosterilecek_isgucu else 0.0
         avg_val = round(sum(gosterilecek_isgucu) / max(1, len(gosterilecek_isgucu)), 1)
@@ -2009,7 +2039,7 @@ if st.session_state["results"] is not None:
         selected_day = st.selectbox("Görüntülenecek Günü Seçin", gunler, key="day_selector")
         if selected_day:
             df_to_show = results["gunluk_cizelgeler"][selected_day]
-            display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi"], errors="ignore")
+            display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi", "op_count"], errors="ignore")
             st.dataframe(display_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------
