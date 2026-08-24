@@ -33,7 +33,7 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
+ADMIN_PIN = "2026"
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -90,7 +90,7 @@ if st.session_state["auth_user"] is None:
                 if submit_btn:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol veya rakam kullanılamaz).")
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -114,7 +114,7 @@ if st.session_state["auth_user"] is None:
                     if not isim_gecerli_mi(temiz_isim):
                         st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
                     elif pin_input != ADMIN_PIN:
-                        st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
+                        st.error("❌ Hatalı yönetici kodu!")
                     else:
                         st.session_state["auth_user"] = f"{temiz_isim.title()} (Yönetici)"
                         st.session_state["is_admin"] = True
@@ -272,14 +272,6 @@ def create_excel_stream_from_dict(factory_dict):
     wb.save(buf)
     buf.seek(0)
     return buf
-
-
-def default_excel_stream():
-    for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
-        if os.path.exists(f_name):
-            with open(f_name, "rb") as f:
-                return io.BytesIO(f.read())
-    return create_excel_stream_from_dict(DEFAULT_FACTORY_DATA)
 
 
 def hiz_matrisini_yukle():
@@ -850,22 +842,34 @@ def run_scheduler_pipeline(
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
-            matching_orders = [
-                o for o in order_pool
-                if o["rem_ton"] > 0.01 and (
-                    o["makine_hedef"] == chosen_m_name or
-                    (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
-                ) and o["süt_tipi"] in ready_st_list
-            ]
-
-            if not matching_orders:
+            # Arızada üretimin yapay olarak artmasını engelleyen katı kilit
+            if is_ariza_gunu and chosen_m_name != ariza_makine:
+                matching_orders = [
+                    o for o in order_pool
+                    if o["rem_ton"] > 0.01 and o["makine_hedef"] == chosen_m_name and o["süt_tipi"] in ready_st_list
+                ]
+                if not matching_orders:
+                    matching_orders = [
+                        o for o in order_pool
+                        if o["rem_ton"] > 0.01 and o["makine_hedef"] == chosen_m_name
+                    ]
+            else:
                 matching_orders = [
                     o for o in order_pool
                     if o["rem_ton"] > 0.01 and (
                         o["makine_hedef"] == chosen_m_name or
                         (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
-                    )
+                    ) and o["süt_tipi"] in ready_st_list
                 ]
+
+                if not matching_orders:
+                    matching_orders = [
+                        o for o in order_pool
+                        if o["rem_ton"] > 0.01 and (
+                            o["makine_hedef"] == chosen_m_name or
+                            (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
+                        )
+                    ]
 
             if not matching_orders:
                 m_info["musait_zamani"] += datetime.timedelta(minutes=15)
@@ -1040,25 +1044,18 @@ def run_scheduler_pipeline(
                 else:
                     break
 
-        # Dinamik Çapraz İşgücü & Havuz Seviyelendirme (Rotasyon Hesabı)
+        # Dinamik Çapraz Rotasyonlu İşgücü Hesabı (30 Dk Örneklemeli T-Anı Havuz Modeli)
         for h_i in range(mesai_h):
-            t_slot_start = gun_baslangic + datetime.timedelta(hours=h_i)
-            t_slot_end = gun_baslangic + datetime.timedelta(hours=h_i + 1)
-            
-            # Bu 1 saatlik dilimde çalışan makineler ve anlık operatör ihtiyacı
-            active_machines_in_hour = []
+            t_mid = gun_baslangic + datetime.timedelta(hours=h_i, minutes=30)
+            active_m_ops = []
             for s_row in schedule:
                 if s_row.get("dt_start") and s_row.get("dt_end"):
-                    if max(s_row["dt_start"], t_slot_start) < min(s_row["dt_end"], t_slot_end):
-                        active_machines_in_hour.append(s_row["op_count"])
+                    if s_row["dt_start"] <= t_mid < s_row["dt_end"] and s_row["Süt Tipi"] != "DURUŞ":
+                        active_m_ops.append(s_row["op_count"])
             
-            # Çapraz rotasyon: Eşzamanlı çalışan hatların operatörleri paylaşması
-            if active_machines_in_hour:
-                max_hat_op = max(active_machines_in_hour)
-                ek_hatlar_op = sum(active_machines_in_hour) - max_hat_op
-                # Çapraz operatör desteği ile hatlar arası sinerji faktörü (%75 verimlilikle paylaşım)
-                net_gereken_insan = max_hat_op + (ek_hatlar_op * 0.75)
-                gunluk_saatlik_isgucu[sheet_name][h_i] = round(net_gereken_insan, 1)
+            if active_m_ops:
+                net_anlik_insan = sum(active_m_ops)
+                gunluk_saatlik_isgucu[sheet_name][h_i] = round(net_anlik_insan, 1)
             else:
                 gunluk_saatlik_isgucu[sheet_name][h_i] = 0.0
 
@@ -1730,7 +1727,7 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
 
-    # 1. Yeni Sipariş Ekleme Alanı (Form dışı - Anında Belleğe Yazar)
+    # 1. Yeni Sipariş Ekleme Alanı (Anında Belleğe Yazar)
     st.markdown(f"#### ➕ {edit_day} Gününe Yeni Sipariş Ekle")
     col_n1, col_n2, col_n3 = st.columns([5, 3, 2])
     with col_n1:
@@ -1921,6 +1918,10 @@ if st.session_state["results"] is not None:
         saatler = [f"{8+i:02d}:00" if 8+i < 24 else f"{8+i-24:02d}:00" for i in range(mesai_h)]
 
         if secilen_isgucu_gorunumu == "📊 Haftalık Genel Ortalama":
+            # Haftalık en yüksek ihtiyaç (Hafta boyunca herhangi bir t anındaki mutlak tepe operatör sayısı)
+            tum_hafta_degerleri = [v for g_vals in results["gunluk_saatlik_isgucu"].values() for v in g_vals]
+            peak_val = max(tum_hafta_degerleri) if tum_hafta_degerleri else 0.0
+            
             toplam_saatlik = [0.0] * mesai_h
             for g_isim, g_vals in results["gunluk_saatlik_isgucu"].items():
                 for h_i, val in enumerate(g_vals):
@@ -1929,9 +1930,9 @@ if st.session_state["results"] is not None:
             grafik_baslik = "Haftalık Ortalama Saatlik İşgücü İhtiyacı (Kişi / Saat - Çapraz Rotasyonlu)"
         else:
             gosterilecek_isgucu = [round(v, 1) for v in results["gunluk_saatlik_isgucu"][secilen_isgucu_gorunumu]]
+            peak_val = max(gosterilecek_isgucu) if gosterilecek_isgucu else 0.0
             grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat - Çapraz Rotasyonlu)"
 
-        peak_val = max(gosterilecek_isgucu) if gosterilecek_isgucu else 0.0
         avg_val = round(sum(gosterilecek_isgucu) / max(1, len(gosterilecek_isgucu)), 1)
         gunduz_avg = round(sum(gosterilecek_isgucu[:10]) / 10.0, 1) if len(gosterilecek_isgucu) >= 10 else 0.0
         gece_avg = round(sum(gosterilecek_isgucu[10:]) / max(1, len(gosterilecek_isgucu[10:])), 1)
