@@ -846,33 +846,10 @@ def run_scheduler_pipeline(
         # ==============================================================================
         # KESİNTİSİZ ÇİZELGELEME MOTORU (P6 VE TANK CIP KISITLI)
         # ==============================================================================
-        while True:
-            # Günün siparişleri bittiğinde sonraki günden sipariş çek (Lookahead)
-            if not any(o["rem_ton"] > 0.01 for o in order_pool):
-                if not pull_forward_attempted and day_idx < len(sheet_names):
-                    next_sheet_name = sheet_names[day_idx]
-                    next_day_orders = haftalik_siparis_havuzu.get(next_sheet_name, [])
-                    pulled_any = False
-                    for no in next_day_orders:
-                        if no["tonaj_ton"] > 0.05:
-                            order_pool.append({
-                                "siparis_id": f"{no['ana_siparis_id']}-PULL",
-                                "ana_id": no["ana_siparis_id"],
-                                "ürün_adı": f"⭐ [ÖNE ÇEKİLEN] {no['ürün_adı']}",
-                                "süt_tipi": no["süt_tipi"],
-                                "gramaj": no["gramaj"],
-                                "makine_hedef": no["makine_hedef"],
-                                "orijinal_ton": no["tonaj_ton"],
-                                "rem_ton": no["tonaj_ton"],
-                                "one_cekilen": True,
-                            })
-                            pulled_any = True
-                    pull_forward_attempted = True
-                    if not pulled_any:
-                        break
-                else:
-                    break
-
+        # ==============================================================================
+        # KESİNTİSİZ ÇİZELGELEME MOTORU (TAM SENKRON VE KISIT TABANLI)
+        # ==============================================================================
+        while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
             for m_name in MAKINE_LISTESI:
                 if is_ariza_gunu and m_name == ariza_makine:
@@ -895,7 +872,7 @@ def run_scheduler_pipeline(
             if not candidate_actions:
                 break
 
-            # 1. Öncelik: Erken boşa çıkan makine, 2. Öncelik: Yüksek kapasiteli kova
+            # 1. Erken boşa çıkan, 2. Hızlı makine
             candidate_actions.sort(
                 key=lambda x: (
                     x[1],
@@ -906,11 +883,12 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
-            # Anlık aktif hat kontrolü (5 makineye kadar kesintisiz)
+            # Anlık aktif hat kontrolü (Gündüz 5, Gece 4 hatta kadar kesintisiz)
+            max_hat_limiti = 5 if current_time < cutoff_gunduz else 4
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
             )
-            if active_count >= 5:
+            if active_count >= max_hat_limiti:
                 future_ends = [
                     item[1] for m in MAKINE_LISTESI for item in machines[m]["calisma_araliklari"] if item[1] > current_time
                 ]
@@ -918,12 +896,13 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
-            # Hazır süt tipleri
+            # O an tankta hazır olan süt tipleri
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and tv["hazir_saat"] is not None and current_time >= tv["hazir_saat"] and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
+            # Sabah 08:00 açılışında ve gün içinde hazır süte uyan siparişleri öncelikle seç
             matching_orders = [
                 o for o in order_pool
                 if o["rem_ton"] > 0.01 and (
@@ -953,7 +932,7 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
-            # Makine CIP Kontrolü (8.5 saatte bir sıralı hat yıkama)
+            # Makine CIP Kontrolü (8.5 saatte bir)
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -976,7 +955,7 @@ def run_scheduler_pipeline(
                 best_t_name, best_t_info = matching_tanks[0]
                 p_start = max(p_start, best_t_info["hazir_saat"])
             else:
-                # Gün içi boşalan tankı anında sıralı CIP ve P6 dolumuna al
+                # Tank boşaldığında sıralı CIP ve P6 dolumuna al
                 sorted_by_empty = sorted(
                     tanks.items(),
                     key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
@@ -993,8 +972,33 @@ def run_scheduler_pipeline(
                 # Sıralı P6 Dolum
                 t_p6_start = max(t_cip_end, p6_state["musaitlik"])
                 
-                # Tank tam partiyle (kapasitesi kadar) doldurulur (Darboğazı kaldıran ana mühendislik kuralı)
-                fill_amount = TANK_KAPASITELERI[refill_t_name]
+                # Bu süt tipini çekebilecek aktif makinelerin toplam çekiş hızı
+                ilgili_makineler = [
+                    m for m in MAKINE_LISTESI 
+                    if any(v["sut_tipi"] == st_req for k, v in MAKINE_HIZLARI[m].items())
+                ]
+                toplam_st_hizi = sum(
+                    makine_hizi_getir(m, "10000g" if "Kova" in m else "1000g", st_req) 
+                    for m in ilgili_makineler
+                )
+                toplam_st_hizi = max(hiz, toplam_st_hizi)
+
+                # 04:00'e kadar işlenebilecek net tonaj hesabı (Sıfır artık / Sıfır zayiat)
+                t_hazir_tahmini = t_p6_start + datetime.timedelta(hours=1.5 + kultur_suresi)
+                kalan_mesai_saati = max(0.0, (cutoff_0400 - t_hazir_tahmini).total_seconds() / 3600.0)
+                max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
+                rem_demand_st = sum(o["rem_ton"] for o in order_pool if o["süt_tipi"] == st_req)
+
+                fill_amount = min(
+                    TANK_KAPASITELERI[refill_t_name],
+                    round(rem_demand_st, 2),
+                    max(0.0, max_uretilebilir)
+                )
+
+                # 04:00'e kadar işlenebilecek en az 2 tonluk süt varsa doldur
+                if fill_amount <= 2.0:
+                    m_info["musait_zamani"] = cutoff_0400
+                    continue
 
                 dolum_suresi = fill_amount / p6_debi
                 p6_kuyruk_dinamik_dk = max(0, int((t_p6_start - t_cip_end).total_seconds() / 60))
@@ -1029,7 +1033,7 @@ def run_scheduler_pipeline(
                     "P6 Bitiş (JIT Kültür)": p6_end.strftime("%d-%m %H:%M"),
                     "P6 Dolum Kuyruğu": f"{p6_kuyruk_dinamik_dk} dk" if p6_kuyruk_dinamik_dk > 0 else "-",
                     "Mayalanma Bitiş (Hazır)": kultur_hazir.strftime("%d-%m %H:%M"),
-                    "Sistemsel Durum & Bekleme Analizi": f"🔄 Gün içi devir: {round(fill_amount,1)}T tam parti süt hazırlandı.",
+                    "Sistemsel Durum & Bekleme Analizi": f"🔄 04:00 Senkron Devir: {round(fill_amount,1)}T süt dolduruldu ve mayalandı.",
                 })
 
                 best_t_name = refill_t_name
