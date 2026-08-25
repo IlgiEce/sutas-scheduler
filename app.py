@@ -139,7 +139,7 @@ plt.rcParams["axes.edgecolor"] = "#D9D9D9"
 plt.rcParams["axes.linewidth"] = 0.8
 
 MIN_SUT_LIMITI_TON = 0.01
-MAKINE_LISTESI = ["Küçük Kova", "Büyük Kova", "132 çap", "160 çap", "Grunwald"]
+MAKINE_LISTESI = ["Küçük Kova", "Büyük Kova", "160 çap", "132 çap", "Grunwald"]
 
 CIP_HATLARI = {
     "160 çap": "HAT_1",
@@ -543,6 +543,7 @@ def gunluk_tank_hazirligi_v80(
     tank_order = ["T43", "T40", "T41", "T42"]
 
     # 1. GÜN (PAZARTESİ): 4 tankın tamamı (113T) dolu başlar.
+    # T43 ve T40 sabah 08:00'e hazır açılır; T41 ve T42 ise JIT kültürlenmeyi bekler.
     if day_idx == 1:
         curr_p6_back = gun_baslangic - datetime.timedelta(hours=14)
         for idx, tk_name in enumerate(tank_order):
@@ -554,8 +555,16 @@ def gunluk_tank_hazirligi_v80(
             p6_end = p6_start + datetime.timedelta(hours=dolum_h)
             curr_p6_back = p6_end
             
-            kultur_bas = gun_baslangic - datetime.timedelta(hours=kultur_suresi)
-            ready_time = gun_baslangic
+            if tk_name in ["T43", "T40"]:
+                kultur_bas = gun_baslangic - datetime.timedelta(hours=kultur_suresi)
+                ready_time = gun_baslangic
+                durum_notu = "✅ Pazartesi Açılışı: 08:00'de mayalanmış ve tam hazır başlatıldı."
+                is_jit_bekliyor = False
+            else:
+                kultur_bas = None
+                ready_time = None
+                durum_notu = "⏳ Pazartesi Açılışı: Süt dolu bekliyor; tüketime göre dinamik JIT mayalanacak."
+                is_jit_bekliyor = True
 
             tanks[tk_name] = {
                 "kapasite": cap,
@@ -565,8 +574,9 @@ def gunluk_tank_hazirligi_v80(
                 "dolum_bitis": p6_end,
                 "kultur_saati": kultur_bas,
                 "hazir_saat": ready_time,
-                "bosalma_saati": ready_time,
+                "bosalma_saati": gun_baslangic,
                 "bagli_makineler": [],
+                "jit_kultur_bekliyor": is_jit_bekliyor,
             }
 
             audit_log_list.append({
@@ -579,15 +589,14 @@ def gunluk_tank_hazirligi_v80(
                 "P6 Dolum Başlangıç": p6_start.strftime("%d-%m %H:%M"),
                 "P6 Bitiş (JIT Kültür)": p6_end.strftime("%d-%m %H:%M"),
                 "P6 Dolum Kuyruğu": "0 dk",
-                "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M"),
-                "Sistemsel Durum & Bekleme Analizi": "✅ Pazartesi Açılışı: 08:00'de kesintisiz tam kapasite hazır başlatıldı.",
+                "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M") if ready_time else "JIT Beklemede",
+                "Sistemsel Durum & Bekleme Analizi": durum_notu,
             })
         
         p6_state["musaitlik"] = gun_baslangic
         return tanks, tank_cip_musaitlik
 
     # SALI - CUMARTESİ: 38T (T43) + 25T (T40) = 63T İLE GÜNE BAŞLAMA
-    # 2 Ana Süt Tipi: 1. Tank = En çok giden (örn. Tam Yağlı), 2. Tank = 2. en çok giden (örn. Yarım Yağlı/Paksüt)
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -633,6 +642,7 @@ def gunluk_tank_hazirligi_v80(
             "hazir_saat": ready_time,
             "bosalma_saati": ready_time,
             "bagli_makineler": [],
+            "jit_kultur_bekliyor": False,
         }
 
         audit_log_list.append({
@@ -666,6 +676,7 @@ def gunluk_tank_hazirligi_v80(
             "hazir_saat": gun_baslangic,
             "bosalma_saati": t_bosaldi,
             "bagli_makineler": [],
+            "jit_kultur_bekliyor": False,
         }
 
     p6_state["musaitlik"] = max(current_p6, gun_baslangic - datetime.timedelta(hours=1.5))
@@ -731,9 +742,10 @@ def run_scheduler_pipeline(
         )
         for g_k, df_b in baz_res["gunluk_cizelgeler"].items():
             ham_ad = g_k.split("(")[-1].replace(")", "").strip()
-            baz_gunluk_uretimler[ham_ad] = df_b["Miktar (Ton)"].sum() if not df_b.empty else 0.0
+            baz_gunluk_uretimler[ham_ad] = df_b[df_b["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum() if not df_b.empty else 0.0
 
     xls = pd.ExcelFile(excel_source)
+    sheet_names = xls.sheet_names
     baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
     mesai_h = int(gunluk_mesai_saati)
 
@@ -763,12 +775,17 @@ def run_scheduler_pipeline(
     toplam_eksik_genel = 0.0
     toplam_efektif_p6_saati = 0.0
 
-    for day_idx, sheet_name in enumerate(xls.sheet_names, 1):
+    # Lookahead için tüm haftalık siparişleri baştan oku
+    haftalik_siparis_havuzu = {}
+    for s_name in sheet_names:
+        haftalik_siparis_havuzu[s_name] = dinamik_projeksiyon_oku(excel_source, s_name)
+
+    for day_idx, sheet_name in enumerate(sheet_names, 1):
         gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
         cutoff_0400 = gun_baslangic + datetime.timedelta(hours=gunluk_mesai_saati)
         gunluk_saatlik_isgucu[sheet_name] = [0.0] * mesai_h
 
-        siparisler = dinamik_projeksiyon_oku(excel_source, sheet_name)
+        siparisler = haftalik_siparis_havuzu[sheet_name]
         if not siparisler:
             continue
 
@@ -842,6 +859,7 @@ def run_scheduler_pipeline(
                 "makine_hedef": s["makine_hedef"],
                 "orijinal_ton": s["tonaj_ton"],
                 "rem_ton": s["tonaj_ton"],
+                "one_cekilen": False,
             })
 
         if "Geçiş" in opt_mode:
@@ -850,11 +868,38 @@ def run_scheduler_pipeline(
             order_pool.sort(key=lambda x: x["rem_ton"], reverse=True)
 
         schedule = []
+        pull_forward_attempted = False
 
         # ==============================================================================
         # KESİNTİSİZ ÇİZELGELEME MOTORU (P6 VE TANK CIP KISITLI)
         # ==============================================================================
-        while any(o["rem_ton"] > 0.01 for o in order_pool):
+        while True:
+            # Günün siparişleri bittiğinde sonraki günden sipariş çek (Lookahead)
+            if not any(o["rem_ton"] > 0.01 for o in order_pool):
+                if not pull_forward_attempted and day_idx < len(sheet_names):
+                    next_sheet_name = sheet_names[day_idx]
+                    next_day_orders = haftalik_siparis_havuzu.get(next_sheet_name, [])
+                    pulled_any = False
+                    for no in next_day_orders:
+                        if no["tonaj_ton"] > 0.05:
+                            order_pool.append({
+                                "siparis_id": f"{no['ana_siparis_id']}-PULL",
+                                "ana_id": no["ana_siparis_id"],
+                                "ürün_adı": f"⭐ [ÖNE ÇEKİLEN] {no['ürün_adı']}",
+                                "süt_tipi": no["süt_tipi"],
+                                "gramaj": no["gramaj"],
+                                "makine_hedef": no["makine_hedef"],
+                                "orijinal_ton": no["tonaj_ton"],
+                                "rem_ton": no["tonaj_ton"],
+                                "one_cekilen": True,
+                            })
+                            pulled_any = True
+                    pull_forward_attempted = True
+                    if not pulled_any:
+                        break
+                else:
+                    break
+
             candidate_actions = []
             for m_name in MAKINE_LISTESI:
                 if is_ariza_gunu and m_name == ariza_makine:
@@ -888,6 +933,15 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
+            # Pazartesi JIT Kültür Tetikleme: T41/T42 bekleyen tankları zamanı gelince mayala
+            for tk_k, tk_v in tanks.items():
+                if tk_v.get("jit_kultur_bekliyor", False) and tk_v["mevcut_sut"] > MIN_SUT_LIMITI_TON:
+                    if tk_v["hazir_saat"] is None:
+                        jit_start = max(gun_baslangic, current_time - datetime.timedelta(hours=kultur_suresi))
+                        tk_v["kultur_saati"] = jit_start
+                        tk_v["hazir_saat"] = jit_start + datetime.timedelta(hours=kultur_suresi)
+                        tk_v["jit_kultur_bekliyor"] = False
+
             # Anlık aktif hat kontrolü (Tüm gün 5 makineye kadar serbest)
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
@@ -903,7 +957,7 @@ def run_scheduler_pipeline(
             # Hazır süt tipleri (Maksimum 10 saat bekleme kısıtı)
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
-                if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and current_time >= tv["hazir_saat"] and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
+                if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and tv["hazir_saat"] is not None and current_time >= tv["hazir_saat"] and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
             matching_orders = [
@@ -949,7 +1003,7 @@ def run_scheduler_pipeline(
 
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
-                if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
+                if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (tv["hazir_saat"] is not None) and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
             if matching_tanks:
@@ -1013,6 +1067,7 @@ def run_scheduler_pipeline(
                 tanks[refill_t_name]["dolum_bitis"] = p6_end
                 tanks[refill_t_name]["kultur_saati"] = kultur_bas
                 tanks[refill_t_name]["hazir_saat"] = kultur_hazir
+                tanks[refill_t_name]["jit_kultur_bekliyor"] = False
 
                 audit_log_list.append({
                     "Gün": f"GÜN {day_idx} ({sheet_name})",
@@ -1076,8 +1131,8 @@ def run_scheduler_pipeline(
                 p_end + datetime.timedelta(hours=tank_cip_suresi),
             )
 
-            cult_str = best_t_info["kultur_saati"].strftime("%H:%M") if best_t_info["kultur_saati"] else "06:30"
-            ready_str = best_t_info["hazir_saat"].strftime("%H:%M") if best_t_info["hazir_saat"] else "08:00"
+            cult_str = best_t_info["kultur_saati"].strftime("%H:%M") if best_t_info.get("kultur_saati") else "06:30"
+            ready_str = best_t_info["hazir_saat"].strftime("%H:%M") if best_t_info.get("hazir_saat") else "08:00"
             hijyen_notu = f"🧪 Kültür: {cult_str} | ✅ Hazır: {ready_str}{cip_notu}"
 
             satir_verisi = {
@@ -1118,7 +1173,7 @@ def run_scheduler_pipeline(
             kayip_ton = round((ariza_sure / 60.0) * makine_hizi_getir(ariza_makine, "10000g", "TAM YAĞLI"), 2)
             hedef_tavan = max(0.0, round(baz_cap - (kayip_ton * 0.70), 2))
             
-            cur_tot = sum(r["Miktar (Ton)"] for r in schedule)
+            cur_tot = sum(r["Miktar (Ton)"] for r in schedule if r["Süt Tipi"] != "DURUŞ")
             if cur_tot > hedef_tavan:
                 fazlalik = round(cur_tot - hedef_tavan, 2)
                 for r_item in reversed(schedule):
@@ -1166,7 +1221,7 @@ def run_scheduler_pipeline(
 
         unfulfilled_rows = []
         for o in order_pool:
-            if o["rem_ton"] > 0.05:
+            if not o.get("one_cekilen", False) and o["rem_ton"] > 0.05:
                 uretilen = max(0.0, round(o["orijinal_ton"] - o["rem_ton"], 2))
                 unfulfilled_rows.append({
                     "Sipariş ID": o["siparis_id"],
@@ -1190,14 +1245,14 @@ def run_scheduler_pipeline(
 
         if not df_merged.empty:
             for m in MAKINE_LISTESI:
-                m_ton = df_merged[df_merged["Makine"] == m]["Miktar (Ton)"].sum()
+                m_ton = df_merged[(df_merged["Makine"] == m) & (df_merged["Süt Tipi"] != "DURUŞ")]["Miktar (Ton)"].sum()
                 gunluk_makine_istatistikleri[m] += m_ton
             for st_val in df_merged["Süt Tipi"].unique():
                 if st_val != "DURUŞ":
                     st_ton = df_merged[df_merged["Süt Tipi"] == st_val]["Miktar (Ton)"].sum()
                     gunluk_sut_istatistikleri[st_val] = gunluk_sut_istatistikleri.get(st_val, 0.0) + st_ton
 
-        day_realized = df_merged["Miktar (Ton)"].sum() if not df_merged.empty else 0.0
+        day_realized = df_merged[df_merged["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum() if not df_merged.empty else 0.0
         day_unfulfilled = sum(r["Eksik Kalan (Ton)"] for r in unfulfilled_rows)
 
         toplam_talep_genel += total_day_demand
