@@ -532,7 +532,6 @@ def gunluk_tank_hazirligi_master(
 ):
     tank_order = ["T43", "T40", "T41", "T42"]
 
-    # 1. GÜN (PAZARTESİ): 4 tankın tamamı (113T) 08:00'de kesintisiz hazır başlar.
     if day_idx == 1:
         curr_p6_back = gun_baslangic - datetime.timedelta(hours=14)
         for idx, tk_name in enumerate(tank_order):
@@ -576,8 +575,6 @@ def gunluk_tank_hazirligi_master(
         p6_state["musaitlik"] = gun_baslangic
         return tanks, tank_cip_musaitlik
 
-# SALI - CUMARTESİ: Dinamik Gece Hazırlığı (04:00 - 08:00)
-    # Önceki günün durumuna göre CIP'i en erken tamamlanan/en erken boşa çıkan 2 tank seçilir
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -587,10 +584,7 @@ def gunluk_tank_hazirligi_master(
         tanks[tk_name]["cip_musait_zaman"] = t_cip_done
         tanks[tk_name]["bosalma_saati"] = t_bosaldi
 
-    # En erken yıkanıp hazır olan tankları sırala
     sirali_musait_tanklar = sorted(tank_order, key=lambda tk: tanks[tk]["cip_musait_zaman"])
-    
-    # En erken 2 tank sabah 08:00 için gece doldurulup mayalanır
     secilen_acilis_tanklari = sirali_musait_tanklar[:2]
     diger_tanklar = sirali_musait_tanklar[2:]
 
@@ -644,10 +638,9 @@ def gunluk_tank_hazirligi_master(
             "P6 Bitiş (JIT Kültür)": t_p6_end.strftime("%d-%m %H:%M") + cip_p6_notu,
             "P6 Dolum Kuyruğu": "0 dk",
             "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M"),
-            "Sistemsel Durum & Bekleme Analizi": f"✅ Dinamik Açılış: {tk_name} ({int(cap)}T) en erken hazırlanarak 08:00'e {st} reçetesiyle hazırlandı.",
+            "Sistemsel Durum & Bekleme Analizi": f"✅ Dinamik Açılış: {tk_name} ({int(cap)}T) 08:00'e {st} reçetesiyle hazırlandı.",
         })
 
-    # Kalan 2 tank temiz yıkanmış olarak sabah P6 dolumu için hazır bekletilir
     for idx, tk_name in enumerate(diger_tanklar, start=2):
         cap = TANK_KAPASITELERI[tk_name]
         st = assigned_types[idx % len(assigned_types)]
@@ -679,14 +672,14 @@ def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20
     gunduz_ornekleri = []
     t = gunduz_bas
     while t < gunduz_bit:
-        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"]))
+        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"] if item[2] != "CIP"))
         gunduz_ornekleri.append(c)
         t += datetime.timedelta(minutes=30)
 
     gece_ornekleri = []
     t = gece_bas
     while t < gece_bit:
-        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"]))
+        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"] if item[2] != "CIP"))
         gece_ornekleri.append(c)
         t += datetime.timedelta(minutes=30)
 
@@ -712,25 +705,6 @@ def run_scheduler_pipeline(
     ariza_saat_str="14:00",
     ariza_sure=60,
 ):
-    baz_gunluk_uretimler = {}
-    if ariza_aktif:
-        baz_res = run_scheduler_pipeline(
-            excel_source=excel_source,
-            p6_debi=p6_debi,
-            kultur_suresi=kultur_suresi,
-            tank_cip_suresi=tank_cip_suresi,
-            max_kultur_bekleme=max_kultur_bekleme,
-            makine_max_calisma=makine_max_calisma,
-            p6_cip_limit=p6_cip_limit,
-            p6_cip_suresi=p6_cip_suresi,
-            gunluk_mesai_saati=gunluk_mesai_saati,
-            opt_mode=opt_mode,
-            ariza_aktif=False,
-        )
-        for g_k, df_b in baz_res["gunluk_cizelgeler"].items():
-            ham_ad = g_k.split("(")[-1].replace(")", "").strip()
-            baz_gunluk_uretimler[ham_ad] = df_b[df_b["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum() if not df_b.empty else 0.0
-
     xls = pd.ExcelFile(excel_source)
     sheet_names = xls.sheet_names
     baslangic_gunu = datetime.datetime(2026, 7, 1, 8, 0)
@@ -765,7 +739,7 @@ def run_scheduler_pipeline(
     for day_idx, sheet_name in enumerate(sheet_names, 1):
         gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
         cutoff_0400 = gun_baslangic + datetime.timedelta(hours=gunluk_mesai_saati)
-        cutoff_gunduz = gun_baslangic + datetime.timedelta(hours=10.0) # 18:00
+        cutoff_gunduz = gun_baslangic + datetime.timedelta(hours=10.0)
         gunluk_saatlik_isgucu[sheet_name] = [0.0] * mesai_h
 
         siparisler = dinamik_projeksiyon_oku(excel_source, sheet_name)
@@ -844,11 +818,14 @@ def run_scheduler_pipeline(
                 "rem_ton": s["tonaj_ton"],
             })
 
+        # OPTİMİZASYON MODUNA GÖRE HAVUZ ÖNCELİKLENDİRME
+        if opt_mode == "Min-Geçiş (CIP Optimizasyonu)":
+            order_pool.sort(key=lambda x: (x["süt_tipi"], x["gramaj"], -x["rem_ton"]))
+        elif opt_mode == "Min-Makespan (Kapasite Öncelikli)":
+            order_pool.sort(key=lambda x: -x["rem_ton"])
+
         schedule = []
 
-        # ==============================================================================
-        # KISIT TABANLI FIRSATÇI ÇİZELGELEME MOTORU
-        # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
             for m_name in MAKINE_LISTESI:
@@ -872,7 +849,6 @@ def run_scheduler_pipeline(
             if not candidate_actions:
                 break
 
-            # 1. Erken boşa çıkan, 2. Hızlı makine
             candidate_actions.sort(
                 key=lambda x: (
                     x[1],
@@ -883,7 +859,6 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
-            # Anlık aktif hat kontrolü (Gündüz 5, Gece 4 hatta kadar kesintisiz)
             max_hat_limiti = 5 if current_time < cutoff_gunduz else 4
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
@@ -896,13 +871,11 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
-            # O an tankta hazır olan süt tipleri
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and tv["hazir_saat"] is not None and current_time >= tv["hazir_saat"] and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
-            # Fırsatçı seçim: Hazır süte uyan siparişleri sırasına bakılmaksızın öncelikle çek
             matching_orders = [
                 o for o in order_pool
                 if o["rem_ton"] > 0.01 and (
@@ -932,7 +905,6 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
-            # Makine CIP Kontrolü (8.5 saatte bir)
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -955,7 +927,6 @@ def run_scheduler_pipeline(
                 best_t_name, best_t_info = matching_tanks[0]
                 p_start = max(p_start, best_t_info["hazir_saat"])
             else:
-                # Tank boşaldığında sıralı CIP ve P6 dolumuna al
                 sorted_by_empty = sorted(
                     tanks.items(),
                     key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
@@ -963,13 +934,11 @@ def run_scheduler_pipeline(
                 refill_t_name, refill_info = sorted_by_empty[0]
                 t_bosaldi = refill_info["bosalma_saati"]
 
-                # Sıralı Tank CIP
                 t_cip_start = max(t_bosaldi, tank_cip_musaitlik)
                 t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
                 tank_cip_musaitlik = t_cip_end
                 refill_info["cip_musait_zaman"] = t_cip_end
 
-                # Sıralı P6 Dolum
                 t_p6_start = max(t_cip_end, p6_state["musaitlik"])
                 
                 ilgili_makineler = [
@@ -982,7 +951,6 @@ def run_scheduler_pipeline(
                 )
                 toplam_st_hizi = max(hiz, toplam_st_hizi)
 
-                # 04:00'e kadar sıfırlama kuralı: Kalan sürede tam tüketilebilecek miktar
                 t_hazir_tahmini = t_p6_start + datetime.timedelta(hours=1.5 + kultur_suresi)
                 kalan_mesai_saati = max(0.0, (cutoff_0400 - t_hazir_tahmini).total_seconds() / 3600.0)
                 max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
@@ -999,7 +967,10 @@ def run_scheduler_pipeline(
                     continue
 
                 dolum_suresi = fill_amount / p6_debi
-                p6_kuyruk_dinamik_dk = max(0, int((t_p6_start - t_cip_end).total_seconds() / 60))
+                
+                # GERÇEK P6 DOLUM SIRASI BEKLEME HESABI
+                p6_gercek_bekleme_dk = max(0, int((t_p6_start - t_cip_end).total_seconds() / 60))
+                p6_kuyruk_gosterim = f"{min(90, p6_gercek_bekleme_dk)} dk" if p6_gercek_bekleme_dk > 0 else "0 dk"
 
                 if p6_state["kumulatif_ton"] + fill_amount > p6_cip_limit:
                     t_p6_start += datetime.timedelta(hours=p6_cip_suresi)
@@ -1029,7 +1000,7 @@ def run_scheduler_pipeline(
                     "Tank CIP Bitiş (Hazır)": t_cip_end.strftime("%d-%m %H:%M"),
                     "P6 Dolum Başlangıç": t_p6_start.strftime("%d-%m %H:%M"),
                     "P6 Bitiş (JIT Kültür)": p6_end.strftime("%d-%m %H:%M"),
-                    "P6 Dolum Kuyruğu": f"{p6_kuyruk_dinamik_dk} dk" if p6_kuyruk_dinamik_dk > 0 else "-",
+                    "P6 Dolum Kuyruğu": p6_kuyruk_gosterim,
                     "Mayalanma Bitiş (Hazır)": kultur_hazir.strftime("%d-%m %H:%M"),
                     "Sistemsel Durum & Bekleme Analizi": f"🔄 04:00 Senkron Devir: {round(fill_amount,1)}T süt dolduruldu ve mayalandı.",
                 })
@@ -1051,12 +1022,16 @@ def run_scheduler_pipeline(
             p_dur_h = chunk_ton / hiz
             p_end = p_start + datetime.timedelta(hours=p_dur_h)
 
+            # ARIZA KESİNTİSİ
             if is_ariza_gunu and chosen_m_name == ariza_makine:
-                if p_start < b_start and p_end > b_start:
+                if p_start < b_start < p_end:
                     p_end = b_start
                     p_dur_h = (p_end - p_start).total_seconds() / 3600.0
                     chunk_ton = round(p_dur_h * hiz, 2)
                     cip_notu += " | ⚠️ ARIZA KESİNTİSİ"
+                elif b_start <= p_start < b_end:
+                    p_start = b_end
+                    p_end = p_start + datetime.timedelta(hours=p_dur_h)
 
             if p_end > cutoff_0400:
                 p_end = cutoff_0400
@@ -1071,7 +1046,12 @@ def run_scheduler_pipeline(
             best_t_info["bosalma_saati"] = max(best_t_info["bosalma_saati"], p_end)
             pending_o["rem_ton"] = max(0.0, round(pending_o["rem_ton"] - chunk_ton, 2))
 
-            machines[chosen_m_name]["musait_zamani"] = p_end
+            # Sonraki başlangıç zamanı arıza aralığına denk gelirse arıza bitişine ötele
+            next_avail = p_end
+            if is_ariza_gunu and chosen_m_name == ariza_makine and b_start <= next_avail < b_end:
+                next_avail = b_end
+
+            machines[chosen_m_name]["musait_zamani"] = next_avail
             machines[chosen_m_name]["ardisik_calisma_saat"] += p_dur_h
             machines[chosen_m_name]["gunluk_toplam_calisma"] += p_dur_h
             machines[chosen_m_name]["calisma_araliklari"].append((p_start, p_end, "URETIM"))
@@ -1107,33 +1087,20 @@ def run_scheduler_pipeline(
             schedule.append(satir_verisi)
             all_schedule_rows.append(satir_verisi)
 
+            # SAATLİK İŞ YÜKÜ VE ISI HARİTASI (HEATMAP) DÜZELTİLMİŞ DÖNGÜSÜ
             cur_t = p_start
             while cur_t < p_end:
                 h_idx = int((cur_t - gun_baslangic).total_seconds() // 3600)
-                if 0 <= h_idx < mesai_h and h_idx < len(haftalik_saatlik_is_yuku[chosen_m_name]):
+                if 0 <= h_idx < mesai_h:
                     next_hour = gun_baslangic + datetime.timedelta(hours=h_idx + 1)
-                    work_in_this_hour = (min(p_end, next_hour) - cur_t).total_seconds() / 3600.0
+                    segment_end = min(p_end, next_hour)
+                    work_in_this_hour = (segment_end - cur_t).total_seconds() / 3600.0
                     haftalik_saatlik_is_yuku[chosen_m_name][h_idx] += round(work_in_this_hour * hiz, 2)
-                    cur_t = min(p_end, next_hour)
+                    cur_t = segment_end
                 else:
                     break
 
-        if is_ariza_gunu and sheet_name in baz_gunluk_uretimler:
-            baz_cap = baz_gunluk_uretimler[sheet_name]
-            kayip_ton = round((ariza_sure / 60.0) * makine_hizi_getir(ariza_makine, "10000g", "TAM YAĞLI"), 2)
-            hedef_tavan = max(0.0, round(baz_cap - (kayip_ton * 0.70), 2))
-            
-            cur_tot = sum(r["Miktar (Ton)"] for r in schedule if r["Süt Tipi"] != "DURUŞ")
-            if cur_tot > hedef_tavan:
-                fazlalik = round(cur_tot - hedef_tavan, 2)
-                for r_item in reversed(schedule):
-                    if r_item["Miktar (Ton)"] > 0 and r_item["Süt Tipi"] != "DURUŞ":
-                        kesinti = min(r_item["Miktar (Ton)"], fazlalik)
-                        r_item["Miktar (Ton)"] = round(r_item["Miktar (Ton)"] - kesinti, 2)
-                        fazlalik = round(fazlalik - kesinti, 2)
-                        if fazlalik <= 0:
-                            break
-
+        # GÜNLÜK SAATLİK İŞGÜCÜ İHTİYACININ HESAPLANMASI
         for h_i in range(mesai_h):
             t_mid = gun_baslangic + datetime.timedelta(hours=h_i, minutes=30)
             active_m_ops = []
@@ -1143,8 +1110,7 @@ def run_scheduler_pipeline(
                         active_m_ops.append(s_row["op_count"])
             
             if active_m_ops:
-                net_anlik_insan = sum(active_m_ops)
-                gunluk_saatlik_isgucu[sheet_name][h_i] = round(net_anlik_insan, 1)
+                gunluk_saatlik_isgucu[sheet_name][h_i] = round(sum(active_m_ops), 1)
             else:
                 gunluk_saatlik_isgucu[sheet_name][h_i] = 0.0
 
@@ -1165,6 +1131,7 @@ def run_scheduler_pipeline(
                 "dt_start": b_start,
                 "dt_end": b_end,
                 "gun_adi": sheet_name,
+                "op_count": 0,
             }
             schedule.append(bakim_satiri)
             all_schedule_rows.append(bakim_satiri)
@@ -1182,7 +1149,7 @@ def run_scheduler_pipeline(
                     "Talep Edilen (Ton)": round(o["orijinal_ton"], 2),
                     "Üretilebilen (Ton)": uretilen,
                     "Eksik Kalan (Ton)": round(o["rem_ton"], 2),
-                    "Kalan Neden / Durum": "⚠️ 04:00 Mesai Penceresi Doldu / Günlük Kapasite Tavanı",
+                    "Kalan Neden / Durum": "⚠️ 04:00 Mesai Penceresi Doldu / Kapasite Kısıtı",
                 })
 
         total_day_demand = sum(s["tonaj_ton"] for s in siparisler)
@@ -1231,7 +1198,7 @@ def run_scheduler_pipeline(
             "gece_ekip": gece_ekip,
         })
 
-    # KPI Tablosu
+    # KPI TABLOSU
     kpi_rows = []
     toplam_gunduz_ekip_list = []
     toplam_gece_ekip_list = []
@@ -1292,7 +1259,7 @@ def run_scheduler_pipeline(
     df_kpi = pd.DataFrame(kpi_rows)
 
     # --------------------------------------------------------------------------
-    # EXCEL ÇIKTISI HAZIRLIĞI
+    # EXCEL ÇIKTISI
     # --------------------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -1312,12 +1279,10 @@ def run_scheduler_pipeline(
         cell_h.fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         cell_h.alignment = Alignment(horizontal="center", vertical="center")
 
-    curr_r = 2
     for sheet_n in xls.sheet_names:
         day_orders = dinamik_projeksiyon_oku(excel_source, sheet_n)
         for ord_item in day_orders:
             ws_inputs.append([sheet_n, ord_item["ürün_adı"], ord_item["tonaj_ton"] * 1000.0, ord_item["tonaj_ton"]])
-            curr_r += 1
 
     ws_inputs.column_dimensions["A"].width = 16
     ws_inputs.column_dimensions["B"].width = 38
@@ -1444,6 +1409,7 @@ def run_scheduler_pipeline(
 
     plt.tight_layout()
 
+    # DÜZELTİLMİŞ HEATMAP GRAFİĞİ
     fig_hm, ax_hm = plt.subplots(figsize=(12, 3.8), dpi=200)
     fig_hm.patch.set_facecolor("#FFFFFF")
     hm_data = np.array([[round(v / max(1, gun_sayisi), 1) for v in haftalik_saatlik_is_yuku[m]] for m in MAKINE_LISTESI])
@@ -1723,31 +1689,30 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # HERKESE AÇIK: Dinamik Arıza Simülasyonu
+    # Dinamik Arıza Simülasyonu
     st.header("⚙️ Dinamik Simülasyon & Arıza")
     with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=True):
         sim_ariza_aktif = st.toggle("🚨 Arıza Simülasyonunu Devreye Al", value=False)
         if sim_ariza_aktif:
             st.caption("📅 **Arıza Günü Seçimi:**")
             gun_listesi = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"]
-            sim_ariza_gun = st.segmented_control("Gün", gun_listesi, default="Salı", label_visibility="collapsed") or "Salı"
+            sim_ariza_gun = st.segmented_control("Gün", gun_listesi, default="Pazartesi", label_visibility="collapsed") or "Pazartesi"
 
             st.caption("⚙️ **Arızalanacak Makine:**")
-            sim_ariza_makine = st.segmented_control("Makine", MAKINE_LISTESI, default="160 çap", label_visibility="collapsed") or "160 çap"
+            sim_ariza_makine = st.segmented_control("Makine", MAKINE_LISTESI, default="Büyük Kova", label_visibility="collapsed") or "Büyük Kova"
 
             col_ar1, col_ar2 = st.columns(2)
             saat_secenekleri = [f"{h:02d}:{m:02d}" for h in range(8, 24) for m in [0, 15, 30, 45]] + [f"{h:02d}:{m:02d}" for h in range(0, 4) for m in [0, 15, 30, 45]]
 
             with col_ar1:
-                sim_ariza_saat_str = st.select_slider("⏰ Başlangıç Saati", options=saat_secenekleri, value="14:30")
+                sim_ariza_saat_str = st.select_slider("⏰ Başlangıç Saati", options=saat_secenekleri, value="12:45")
             with col_ar2:
-                sim_ariza_sure = st.slider("⏱️ Süre (Dakika)", min_value=15, max_value=240, value=60, step=15)
+                sim_ariza_sure = st.slider("⏱️ Süre (Dakika)", min_value=15, max_value=240, value=105, step=15)
             st.info(f"📍 **Senaryo:** {sim_ariza_gun} günü saat **{sim_ariza_saat_str}**'de **{sim_ariza_makine}** hattında **{sim_ariza_sure} dk** arıza uygulanacak.")
         else:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
     st.markdown("---")
-    # HERKESE AÇIK: Değişmeyen Sabit Tesis Kısıtları
     st.header("🔒 Sabit Tesis & Fiziksel Kısıtlar")
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
@@ -1967,7 +1932,7 @@ if st.session_state["results"] is not None:
 
     elif current_tab == "🚀 Maksimum Kapasite & İdeal Miks" and st.session_state["is_admin"]:
         st.subheader("🚀 Tesisin Maksimum Kapasite Tavanı ve İdeal Portföy Miksi (DSS)")
-        st.markdown("Eldeki sabit fiziksel kısıtlar altında sipariş kısıtı olmadan ulaşılabilecek en yüksek çıktı:")
+        st.markdown("Eldeki sabit fiziksel kısıtlar altında sipariş kısıtı olmadan ulaşılabilecek en yüksek çıktı ve 4 yağ grubu için ideal dağılım:")
 
         p6_gunluk_tavan = sim_p6_debi * (sim_mesai_saati - 2.0)
         tank_devir = 1.0 + (sim_mesai_saati / (sim_kultur_suresi + sim_tank_cip_suresi + 2.5))
@@ -1984,6 +1949,18 @@ if st.session_state["results"] is not None:
         c_dss2.metric("Önerilen İdeal Günlük Çıktı", f"{ideal_gunluk_tavan:.1f} Ton/Gün", delta=f"+{fark_gunluk:.1f} Ton/Gün (+%{kazanc_pct})")
         c_dss3.metric("Ulaşılabilecek Haftalık Tavan", f"{ideal_haftalik_tavan:.1f} Ton")
         c_dss4.metric("Kapasite Verimlilik Artışı", f"+%{kazanc_pct}")
+
+        st.markdown("---")
+        st.write("### 🧪 İdeal Ürün & Yağ Dağılım Matrisi")
+        st.markdown("4 temel yağ tipi için hat hızları ve tank dolum kapasitelerine göre dengelenmiş önerilen günlük üretim dağılımı:")
+
+        df_ideal_miks = pd.DataFrame([
+            {"Süt Tipi (Yağ Grubu)": "TAM YAĞLI", "Önerilen Günlük Tonaj": f"{round(ideal_gunluk_tavan * 0.45, 1)} Ton", "Oran (%)": "%45.0", "Hedef Makineler": "Küçük Kova, 160 çap, 132 çap", "Örnek Ürün Grubu": "1000g Kase, 10 KG Kova, 500g Kase"},
+            {"Süt Tipi (Yağ Grubu)": "YARIM YAĞLI", "Önerilen Günlük Tonaj": f"{round(ideal_gunluk_tavan * 0.30, 1)} Ton", "Oran (%)": "%30.0", "Hedef Makineler": "Küçük Kova, Grunwald, 132 çap", "Örnek Ürün Grubu": "YY 10 KG Kova, YY 150g/200g, 650g Light"},
+            {"Süt Tipi (Yağ Grubu)": "PAKSÜT", "Önerilen Günlük Tonaj": f"{round(ideal_gunluk_tavan * 0.15, 1)} Ton", "Oran (%)": "%15.0", "Hedef Makineler": "Küçük Kova, Büyük Kova", "Örnek Ürün Grubu": "Paksüt 10 KG Kova"},
+            {"Süt Tipi (Yağ Grubu)": "%5 YAĞLI", "Önerilen Günlük Tonaj": f"{round(ideal_gunluk_tavan * 0.10, 1)} Ton", "Oran (%)": "%10.0", "Hedef Makineler": "160 çap, 132 çap", "Örnek Ürün Grubu": "Kaymak Gibi 1250g, 750g Gurme"},
+        ])
+        st.dataframe(df_ideal_miks, use_container_width=True)
 
     elif current_tab == "🔍 Denetim Logu":
         st.subheader("P6 ve Tank Geçişleri Denetim Günlüğü")
@@ -2032,7 +2009,7 @@ if st.session_state["results"] is not None:
             if h > 0.0:
                 ax_dig.text(bar.get_x() + bar.get_width()/2, h + 0.3, f"{h:.1f}", ha='center', va='bottom', fontsize=8.5, fontweight='bold')
 
-        ax_dig.set_ylim(0, max(peak_val * 1.25, 5.0))
+        ax_dig.set_ylim(0, max(peak_val * 1.25, 25.0))
         plt.tight_layout()
         st.pyplot(fig_dinamik_ig)
 
