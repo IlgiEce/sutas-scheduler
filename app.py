@@ -586,11 +586,8 @@ def gunluk_tank_hazirligi_v80(
         p6_state["musaitlik"] = gun_baslangic
         return tanks, tank_cip_musaitlik
 
-    # SALI - CUMARTESİ: HİBRİT GECE DÖNGÜSÜ
-    # 1. ve 2. Tank (T43 ve T40 = 63 Ton): Sabah 08:00'e JIT taze mayalanır (0 bekleme süresi)
-    # 3. ve 4. Tank (T41 ve T42): Temiz CIP yapılmış bekletilir, sabah P6 dolumuyla devreye girer.
-    
-    # 1. Adım: Boşalan tankları vakit kaybetmeden İLK MÜSAİT ANDA yıka
+    # SALI - CUMARTESİ: 38T (T43) + 25T (T40) = 63T İLE GÜNE BAŞLAMA
+    # 2 Ana Süt Tipi: 1. Tank = En çok giden (örn. Tam Yağlı), 2. Tank = 2. en çok giden (örn. Yarım Yağlı/Paksüt)
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -600,13 +597,11 @@ def gunluk_tank_hazirligi_v80(
         tanks[tk_name]["cip_musait_zaman"] = t_cip_done
         tanks[tk_name]["bosalma_saati"] = t_bosaldi
 
-    # 2. Adım: Gece JIT Dolumu (T43 ve T40)
+    # Gece JIT Dolumu: T43 (38T) ve T40 (25T) sabah 08:00'e 2 farklı reçeteyle hazır yetiştirilir
     current_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
+    sabah_acilis_tanklari = [("T43", 38.0, assigned_types[0]), ("T40", 25.0, assigned_types[1] if len(assigned_types) > 1 else assigned_types[0])]
 
-    # T43 ve T40 sabah 08:00'e hazır yetiştirilir
-    for idx, tk_name in enumerate(["T43", "T40"]):
-        cap = TANK_KAPASITELERI[tk_name]
-        st = assigned_types[idx % len(assigned_types)]
+    for tk_name, cap, st in sabah_acilis_tanklari:
         t_cip_done = tanks[tk_name]["cip_musait_zaman"]
         t_bosaldi = tanks[tk_name]["bosalma_saati"]
 
@@ -651,10 +646,10 @@ def gunluk_tank_hazirligi_v80(
             "P6 Bitiş (JIT Kültür)": t_p6_end.strftime("%d-%m %H:%M") + cip_p6_notu,
             "P6 Dolum Kuyruğu": "0 dk",
             "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M"),
-            "Sistemsel Durum & Bekleme Analizi": "✅ Gece JIT Dolumu: 08:00 vardiyasına taze mayalanmış hazırlandı.",
+            "Sistemsel Durum & Bekleme Analizi": f"✅ 63T Açılış Partisi: {st} reçetesiyle 08:00'de hazır başlatıldı.",
         })
 
-    # T41 ve T42 temiz yıkanmış olarak sabah devrine hazır bekletilir
+    # T41 ve T42 temiz yıkanmış olarak sabah P6 dolumu için hazır bekletilir
     for idx, tk_name in enumerate(["T41", "T42"], start=2):
         cap = TANK_KAPASITELERI[tk_name]
         st = assigned_types[idx % len(assigned_types)]
@@ -784,7 +779,7 @@ def run_scheduler_pipeline(
 
         sorted_types = sorted(demand_by_type.keys(), key=lambda k: -demand_by_type[k])
         assigned_types = []
-        for pref in ["YARIM YAĞLI", "TAM YAĞLI", "%5 YAĞLI", "PAKSÜT"]:
+        for pref in ["TAM YAĞLI", "YARIM YAĞLI", "PAKSÜT", "%5 YAĞLI"]:
             if pref in demand_by_type and pref not in assigned_types:
                 assigned_types.append(pref)
 
@@ -893,7 +888,7 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
-            # Anlık aktif hat kontrolü (Gündüz 5 makine, gece iş bittikçe azalır)
+            # Anlık aktif hat kontrolü (Tüm gün 5 makineye kadar serbest)
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
             )
@@ -929,8 +924,7 @@ def run_scheduler_pipeline(
                 ]
 
             if not matching_orders:
-                m_info["musait_zamani"] += datetime.timedelta(minutes=15)
-                continue
+                break
 
             pending_o = matching_orders[0]
             st_req = pending_o["süt_tipi"]
