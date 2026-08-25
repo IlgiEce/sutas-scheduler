@@ -576,8 +576,8 @@ def gunluk_tank_hazirligi_master(
         p6_state["musaitlik"] = gun_baslangic
         return tanks, tank_cip_musaitlik
 
-    # SALI - CUMARTESİ: Gece JIT Hazırlığı (04:00 - 08:00)
-    # T43 (38T Tam Yağlı) ve T40 (25T Yarım Yağlı) sabah 08:00'e %100 hazır yetiştirilir
+# SALI - CUMARTESİ: Dinamik Gece Hazırlığı (04:00 - 08:00)
+    # Önceki günün durumuna göre CIP'i en erken tamamlanan/en erken boşa çıkan 2 tank seçilir
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -587,13 +587,18 @@ def gunluk_tank_hazirligi_master(
         tanks[tk_name]["cip_musait_zaman"] = t_cip_done
         tanks[tk_name]["bosalma_saati"] = t_bosaldi
 
-    current_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
-    sabah_acilis_tanklari = [
-        ("T43", 38.0, assigned_types[0]),
-        ("T40", 25.0, assigned_types[1] if len(assigned_types) > 1 else assigned_types[0])
-    ]
+    # En erken yıkanıp hazır olan tankları sırala
+    sirali_musait_tanklar = sorted(tank_order, key=lambda tk: tanks[tk]["cip_musait_zaman"])
+    
+    # En erken 2 tank sabah 08:00 için gece doldurulup mayalanır
+    secilen_acilis_tanklari = sirali_musait_tanklar[:2]
+    diger_tanklar = sirali_musait_tanklar[2:]
 
-    for tk_name, cap, st in sabah_acilis_tanklari:
+    current_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
+
+    for idx, tk_name in enumerate(secilen_acilis_tanklari):
+        cap = TANK_KAPASITELERI[tk_name]
+        st = assigned_types[idx % len(assigned_types)]
         t_cip_done = tanks[tk_name]["cip_musait_zaman"]
         t_bosaldi = tanks[tk_name]["bosalma_saati"]
 
@@ -604,12 +609,13 @@ def gunluk_tank_hazirligi_master(
         cip_p6_notu = ""
         if p6_state["kumulatif_ton"] + cap > p6_cip_limit:
             t_p6_start += datetime.timedelta(hours=p6_cip_suresi)
-            p6_state["kumulatif_ton"] = 0.0
+            p6_state["kumulatif_ton"] = cap
             cip_p6_notu = f" (🧼 P6 {int(p6_cip_limit)}T CIP)"
+        else:
+            p6_state["kumulatif_ton"] += cap
 
         t_p6_end = t_p6_start + datetime.timedelta(hours=dolum_h)
         current_p6 = t_p6_end
-        p6_state["kumulatif_ton"] += cap
 
         kultur_bas = t_p6_end
         actual_ready = kultur_bas + datetime.timedelta(hours=kultur_suresi)
@@ -638,10 +644,11 @@ def gunluk_tank_hazirligi_master(
             "P6 Bitiş (JIT Kültür)": t_p6_end.strftime("%d-%m %H:%M") + cip_p6_notu,
             "P6 Dolum Kuyruğu": "0 dk",
             "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M"),
-            "Sistemsel Durum & Bekleme Analizi": f"✅ 63T Açılış Partisi: {st} reçetesiyle 08:00'de hazır başlatıldı.",
+            "Sistemsel Durum & Bekleme Analizi": f"✅ Dinamik Açılış: {tk_name} ({int(cap)}T) en erken hazırlanarak 08:00'e {st} reçetesiyle hazırlandı.",
         })
 
-    for idx, tk_name in enumerate(["T41", "T42"], start=2):
+    # Kalan 2 tank temiz yıkanmış olarak sabah P6 dolumu için hazır bekletilir
+    for idx, tk_name in enumerate(diger_tanklar, start=2):
         cap = TANK_KAPASITELERI[tk_name]
         st = assigned_types[idx % len(assigned_types)]
         t_cip_done = tanks[tk_name]["cip_musait_zaman"]
