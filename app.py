@@ -28,9 +28,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ==============================================================================
-# KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
-# ==============================================================================
 ADMIN_PIN = "2026"
 
 def isim_gecerli_mi(isim: str) -> bool:
@@ -562,20 +559,33 @@ def gunluk_tank_hazirligi_v80(
     tanks = {}
     tank_list = [("T43", 38.0), ("T40", 25.0), ("T41", 25.0), ("T42", 25.0)]
 
-    # 1. GÜN (PAZARTESİ): 4 tankın tamamı (113T) 08:00'de kesintisiz hazır başlar
+    # 1. GÜN (PAZARTESİ): 4 tankın tamamı (113T) P6'dan ARDIŞIK doldurulur ve 08:00'de hazır başlar
     if day_idx == 1:
+        toplam_dolum_saati = sum(cap for _, cap in tank_list) / p6_debi
+        curr_p6_back = gun_baslangic - datetime.timedelta(hours=toplam_dolum_saati + kultur_suresi)
+        
         for idx, (tk_name, cap) in enumerate(tank_list):
             st = assigned_types[idx % len(assigned_types)]
+            dolum_h = cap / p6_debi
+            
+            p6_start = curr_p6_back
+            p6_end = p6_start + datetime.timedelta(hours=dolum_h)
+            curr_p6_back = p6_end
+            
+            kultur_bas = p6_end
+            ready_time = max(gun_baslangic, kultur_bas + datetime.timedelta(hours=kultur_suresi))
+
             tanks[tk_name] = {
                 "kapasite": cap,
                 "mevcut_sut": cap,
                 "sut_tipi": st,
-                "cip_musait_zaman": gun_baslangic - datetime.timedelta(hours=6),
-                "dolum_bitis": gun_baslangic - datetime.timedelta(hours=2),
-                "kultur_saati": gun_baslangic - datetime.timedelta(hours=kultur_suresi),
-                "hazir_saat": gun_baslangic,
+                "cip_musait_zaman": gun_baslangic - datetime.timedelta(hours=14),
+                "dolum_bitis": p6_end,
+                "kultur_saati": kultur_bas,
+                "hazir_saat": ready_time,
                 "bosalma_saati": gun_baslangic,
             }
+
             audit_log_list.append({
                 "Gün": f"GÜN {day_idx} ({day_name})",
                 "Tank": tk_name,
@@ -583,12 +593,13 @@ def gunluk_tank_hazirligi_v80(
                 "Süt Tipi": st,
                 "Önceki Gün Boşalma": "-",
                 "Tank CIP Bitiş (Hazır)": "-",
-                "P6 Dolum Başlangıç": (gun_baslangic - datetime.timedelta(hours=4.0)).strftime("%d-%m %H:%M"),
-                "P6 Bitiş (JIT Kültür)": (gun_baslangic - datetime.timedelta(hours=1.5)).strftime("%d-%m %H:%M"),
+                "P6 Dolum Başlangıç": p6_start.strftime("%d-%m %H:%M"),
+                "P6 Bitiş (JIT Kültür)": p6_end.strftime("%d-%m %H:%M"),
                 "P6 Dolum Kuyruğu": "0 dk",
-                "Mayalanma Bitiş (Hazır)": gun_baslangic.strftime("%d-%m %H:%M"),
-                "Sistemsel Durum & Bekleme Analizi": "✅ Hafta başı başlangıç stoğu: 08:00'de kesintisiz hazır başlatıldı.",
+                "Mayalanma Bitiş (Hazır)": ready_time.strftime("%d-%m %H:%M"),
+                "Sistemsel Durum & Bekleme Analizi": "✅ Hafta başı başlangıç stoğu: P6'dan sıralı doldurulup 08:00'de kesintisiz hazır başlatıldı.",
             })
+            
         p6_state["musaitlik"] = gun_baslangic
         return tanks
 
@@ -1244,12 +1255,6 @@ def run_scheduler_pipeline(
     genel_uyum = (toplam_gerceklesen_genel / max(0.01, toplam_talep_genel)) * 100
     ort_gunduz_ekip = round(sum(toplam_gunduz_ekip_list) / max(1, len(toplam_gunduz_ekip_list)), 1)
     ort_gece_ekip = round(sum(toplam_gece_ekip_list) / max(1, len(toplam_gece_ekip_list)), 1)
-
-    doygunluk_gece = 92.5
-    doygunluk_p6 = round(genel_p6_oee, 1)
-    doygunluk_tanklar = 74.0
-    doygunluk_makineler = round((toplam_gerceklesen_genel / (340.0 * gun_sayisi)) * 100, 1)
-    doygunluk_cip = 25.0
 
     kpi_rows.append({
         "Gün / Üretim Sayfası": "📊 HAFTALIK GENEL ORTALAMA",
