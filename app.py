@@ -587,7 +587,7 @@ def gunluk_tank_hazirligi_v80(
         return tanks, tank_cip_musaitlik
 
     # SALI - CUMARTESİ: 38T (T43) + 25T (T40) = 63T İLE GÜNE BAŞLAMA
-    # 2 Ana Süt Tipi: 1. Tank = En çok giden (örn. Tam Yağlı), 2. Tank = 2. en çok giden (örn. Yarım Yağlı/Paksüt)
+    # Boşalan tankları vakit kaybetmeden İLK MÜSAİT ANDA yıka
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -924,7 +924,8 @@ def run_scheduler_pipeline(
                 ]
 
             if not matching_orders:
-                break
+                m_info["musait_zamani"] += datetime.timedelta(minutes=15)
+                continue
 
             pending_o = matching_orders[0]
             st_req = pending_o["süt_tipi"]
@@ -1065,16 +1066,21 @@ def run_scheduler_pipeline(
             best_t_info["bosalma_saati"] = max(best_t_info["bosalma_saati"], p_end)
             pending_o["rem_ton"] = max(0.0, round(pending_o["rem_ton"] - chunk_ton, 2))
 
+            # --- BOŞALAN TANKI ANINDA İLK MÜSAİT CIP'E ALMA ---
+            if best_t_info["mevcut_sut"] <= MIN_SUT_LIMITI_TON:
+                t_cip_basla = max(p_end, tank_cip_musaitlik)
+                t_cip_bit = t_cip_basla + datetime.timedelta(hours=tank_cip_suresi)
+                tank_cip_musaitlik = t_cip_bit
+                best_t_info["cip_musait_zaman"] = t_cip_bit
+                tank_states[best_t_name]["cip_musait_zaman"] = t_cip_bit
+            # ----------------------------------------------------
+
             machines[chosen_m_name]["musait_zamani"] = p_end
             machines[chosen_m_name]["ardisik_calisma_saat"] += p_dur_h
             machines[chosen_m_name]["gunluk_toplam_calisma"] += p_dur_h
             machines[chosen_m_name]["calisma_araliklari"].append((p_start, p_end, "URETIM"))
 
             tank_states[best_t_name]["bosalma_saati"] = max(tank_states[best_t_name]["bosalma_saati"], p_end)
-            tank_states[best_t_name]["cip_musait_zaman"] = max(
-                tank_states[best_t_name]["cip_musait_zaman"],
-                p_end + datetime.timedelta(hours=tank_cip_suresi),
-            )
 
             cult_str = best_t_info["kultur_saati"].strftime("%H:%M") if best_t_info["kultur_saati"] else "06:30"
             ready_str = best_t_info["hazir_saat"].strftime("%H:%M") if best_t_info["hazir_saat"] else "08:00"
