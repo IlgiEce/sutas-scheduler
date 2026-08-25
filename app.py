@@ -515,7 +515,7 @@ def ardilsik_uretimleri_birlestir(df_schedule):
     return pd.DataFrame(merged_rows)
 
 
-def gunluk_tank_hazirligi_master_v2(
+def gunluk_tank_hazirligi_master(
     day_idx,
     day_name,
     gun_baslangic,
@@ -576,7 +576,8 @@ def gunluk_tank_hazirligi_master_v2(
         p6_state["musaitlik"] = gun_baslangic
         return tanks, tank_cip_musaitlik
 
-    # SALI - CUMARTESİ: Gece Hazırlığı (04:00 - 08:00)
+    # SALI - CUMARTESİ: Gece JIT Hazırlığı (04:00 - 08:00)
+    # T43 (38T Tam Yağlı) ve T40 (25T Yarım Yağlı) sabah 08:00'e %100 hazır yetiştirilir
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -754,16 +755,13 @@ def run_scheduler_pipeline(
     toplam_eksik_genel = 0.0
     toplam_efektif_p6_saati = 0.0
 
-    haftalik_siparis_havuzu = {}
-    for s_name in sheet_names:
-        haftalik_siparis_havuzu[s_name] = dinamik_projeksiyon_oku(excel_source, s_name)
-
     for day_idx, sheet_name in enumerate(sheet_names, 1):
         gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
         cutoff_0400 = gun_baslangic + datetime.timedelta(hours=gunluk_mesai_saati)
+        cutoff_gunduz = gun_baslangic + datetime.timedelta(hours=10.0) # 18:00
         gunluk_saatlik_isgucu[sheet_name] = [0.0] * mesai_h
 
-        siparisler = haftalik_siparis_havuzu[sheet_name]
+        siparisler = dinamik_projeksiyon_oku(excel_source, sheet_name)
         if not siparisler:
             continue
 
@@ -785,7 +783,7 @@ def run_scheduler_pipeline(
         while len(assigned_types) < 4:
             assigned_types.append(sorted_types[0] if sorted_types else "TAM YAĞLI")
 
-        tanks, tank_cip_musaitlik = gunluk_tank_hazirligi_master_v2(
+        tanks, tank_cip_musaitlik = gunluk_tank_hazirligi_master(
             day_idx,
             sheet_name,
             gun_baslangic,
@@ -837,17 +835,12 @@ def run_scheduler_pipeline(
                 "makine_hedef": s["makine_hedef"],
                 "orijinal_ton": s["tonaj_ton"],
                 "rem_ton": s["tonaj_ton"],
-                "one_cekilen": False,
             })
 
         schedule = []
-        pull_forward_attempted = False
 
         # ==============================================================================
-        # KESİNTİSİZ ÇİZELGELEME MOTORU (P6 VE TANK CIP KISITLI)
-        # ==============================================================================
-        # ==============================================================================
-        # KESİNTİSİZ ÇİZELGELEME MOTORU (TAM SENKRON VE KISIT TABANLI)
+        # KISIT TABANLI FIRSATÇI ÇİZELGELEME MOTORU
         # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
@@ -902,7 +895,7 @@ def run_scheduler_pipeline(
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and tv["hazir_saat"] is not None and current_time >= tv["hazir_saat"] and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
             ]
 
-            # Sabah 08:00 açılışında ve gün içinde hazır süte uyan siparişleri öncelikle seç
+            # Fırsatçı seçim: Hazır süte uyan siparişleri sırasına bakılmaksızın öncelikle çek
             matching_orders = [
                 o for o in order_pool
                 if o["rem_ton"] > 0.01 and (
@@ -972,7 +965,6 @@ def run_scheduler_pipeline(
                 # Sıralı P6 Dolum
                 t_p6_start = max(t_cip_end, p6_state["musaitlik"])
                 
-                # Bu süt tipini çekebilecek aktif makinelerin toplam çekiş hızı
                 ilgili_makineler = [
                     m for m in MAKINE_LISTESI 
                     if any(v["sut_tipi"] == st_req for k, v in MAKINE_HIZLARI[m].items())
@@ -983,7 +975,7 @@ def run_scheduler_pipeline(
                 )
                 toplam_st_hizi = max(hiz, toplam_st_hizi)
 
-                # 04:00'e kadar işlenebilecek net tonaj hesabı (Sıfır artık / Sıfır zayiat)
+                # 04:00'e kadar sıfırlama kuralı: Kalan sürede tam tüketilebilecek miktar
                 t_hazir_tahmini = t_p6_start + datetime.timedelta(hours=1.5 + kultur_suresi)
                 kalan_mesai_saati = max(0.0, (cutoff_0400 - t_hazir_tahmini).total_seconds() / 3600.0)
                 max_uretilebilir = round(kalan_mesai_saati * toplam_st_hizi, 2)
@@ -995,7 +987,6 @@ def run_scheduler_pipeline(
                     max(0.0, max_uretilebilir)
                 )
 
-                # 04:00'e kadar işlenebilecek en az 2 tonluk süt varsa doldur
                 if fill_amount <= 2.0:
                     m_info["musait_zamani"] = cutoff_0400
                     continue
@@ -1173,7 +1164,7 @@ def run_scheduler_pipeline(
 
         unfulfilled_rows = []
         for o in order_pool:
-            if not o.get("one_cekilen", False) and o["rem_ton"] > 0.05:
+            if o["rem_ton"] > 0.05:
                 uretilen = max(0.0, round(o["orijinal_ton"] - o["rem_ton"], 2))
                 unfulfilled_rows.append({
                     "Sipariş ID": o["siparis_id"],
@@ -2105,7 +2096,7 @@ if st.session_state["results"] is not None:
             st.dataframe(display_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# SAYFA EN ALTI: FOOTER
+# SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
 # ------------------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
