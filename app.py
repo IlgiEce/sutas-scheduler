@@ -15,14 +15,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import re
 
-# ==============================================================================
-# GELİŞTİRİCİ TANIMLARI
-# ==============================================================================
 DEVELOPER_NAME = "İlgi Ece Çakmak"
 
-# ==============================================================================
-# SAYFA VE GRAFİK YAPILANDIRMASI
-# ==============================================================================
 st.set_page_config(
     page_title="Sütaş Karacabey Master Scheduler & DSS",
     page_icon="🏭",
@@ -30,9 +24,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ==============================================================================
-# KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
-# ==============================================================================
 ADMIN_PIN = "2026"
 
 def isim_gecerli_mi(isim: str) -> bool:
@@ -45,7 +36,6 @@ def isim_gecerli_mi(isim: str) -> bool:
     if any(len(k) < 2 for k in kelimeler):
         return False
     return True
-
 
 def sheet_log_kaydet(kullanici_etiketi: str):
     turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
@@ -67,7 +57,6 @@ def sheet_log_kaydet(kullanici_etiketi: str):
     except Exception:
         pass
 
-
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
 if "is_admin" not in st.session_state:
@@ -77,16 +66,13 @@ if "admin_login_mode" not in st.session_state:
 
 if st.session_state["auth_user"] is None:
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    
     with col_l2:
         st.markdown("## 🏭 Sütaş Karacabey Scheduler & DSS")
-        
         if not st.session_state["admin_login_mode"]:
             st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı girip Enter'a basınız.")
             with st.form("login_form", clear_on_submit=False):
                 user_name = st.text_input("Ad Soyad:", placeholder="örn: Ahmet Yılmaz")
                 submit_btn = st.form_submit_button("Sisteme Giriş Yap ↵", use_container_width=True, type="primary")
-                
                 if submit_btn:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
@@ -97,19 +83,16 @@ if st.session_state["auth_user"] is None:
                         st.session_state["is_admin"] = False
                         sheet_log_kaydet(temiz_isim.title())
                         st.rerun()
-
             st.markdown("---")
             if st.button("👑 Yönetici Olarak Devam Et", use_container_width=True):
                 st.session_state["admin_login_mode"] = True
                 st.rerun()
-
         else:
             st.warning("🔒 **Yönetici Giriş Paneli**")
             with st.form("admin_form", clear_on_submit=False):
                 admin_name = st.text_input("Yönetici Ad Soyad:", placeholder="örn: Sistem Yöneticisi")
                 pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
                 admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap ↵", use_container_width=True, type="primary")
-                
                 if admin_submit:
                     temiz_isim = admin_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
@@ -124,16 +107,11 @@ if st.session_state["auth_user"] is None:
                         st.session_state["admin_login_mode"] = False
                         sheet_log_kaydet(f"{temiz_isim.title()} (Yönetici)")
                         st.rerun()
-
             if st.button("⬅️ Kullanıcı Girişine Dön", use_container_width=True):
                 st.session_state["admin_login_mode"] = False
                 st.rerun()
-
     st.stop()
 
-# ==============================================================================
-# MEVCUT UYGULAMA TANIMLARI
-# ==============================================================================
 plt.rcParams["font.sans-serif"] = "DejaVu Sans"
 plt.rcParams["axes.edgecolor"] = "#D9D9D9"
 plt.rcParams["axes.linewidth"] = 0.8
@@ -262,7 +240,6 @@ DEFAULT_FACTORY_DATA = {
 
 URUN_KATALOGU = sorted(list({p[0] for day_rows in DEFAULT_FACTORY_DATA.values() for p in day_rows}))
 
-
 def create_excel_stream_from_dict(factory_dict):
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -275,7 +252,6 @@ def create_excel_stream_from_dict(factory_dict):
     wb.save(buf)
     buf.seek(0)
     return buf
-
 
 def hiz_matrisini_yukle():
     return {
@@ -311,9 +287,7 @@ def hiz_matrisini_yukle():
         },
     }
 
-
 MAKINE_HIZLARI = hiz_matrisini_yukle()
-
 
 def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
     if makine_adi == "160 çap":
@@ -327,7 +301,6 @@ def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
     elif makine_adi == "Büyük Kova":
         return 6.0
     return 4.0
-
 
 def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
     u = str(urun_adi).upper()
@@ -388,7 +361,6 @@ def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
 
     return st, g, m
 
-
 def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
     if makine_adi == "Küçük Kova":
         return 5.64 if gramaj_adi == "5000g" else 6.768
@@ -422,7 +394,6 @@ def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
         return 2.1216
     return 3.5
 
-
 def sut_tipi_toplam_hiz_getir(sut_tipi, makineler):
     tot = 0.0
     for m in makineler:
@@ -431,7 +402,6 @@ def sut_tipi_toplam_hiz_getir(sut_tipi, makineler):
                 tot += bil["hiz"]
                 break
     return max(2.5, tot)
-
 
 def dinamik_projeksiyon_oku(excel_source, sheet_name):
     df = pd.read_excel(excel_source, sheet_name=sheet_name, header=None)
@@ -496,7 +466,6 @@ def dinamik_projeksiyon_oku(excel_source, sheet_name):
             idx += 1
     return siparisler
 
-
 def ardilsik_uretimleri_birlestir(df_schedule):
     if df_schedule.empty:
         return df_schedule
@@ -523,7 +492,6 @@ def ardilsik_uretimleri_birlestir(df_schedule):
     if curr is not None:
         merged_rows.append(curr)
     return pd.DataFrame(merged_rows)
-
 
 def gunluk_tank_hazirligi_v80(
     day_idx,
@@ -587,7 +555,6 @@ def gunluk_tank_hazirligi_v80(
         return tanks, tank_cip_musaitlik
 
     # SALI - CUMARTESİ: 38T (T43) + 25T (T40) = 63T İLE GÜNE BAŞLAMA
-    # Boşalan tankları vakit kaybetmeden İLK MÜSAİT ANDA yıka
     for tk_name in tank_order:
         prev_state = tanks.get(tk_name, {})
         t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=12))
@@ -597,7 +564,7 @@ def gunluk_tank_hazirligi_v80(
         tanks[tk_name]["cip_musait_zaman"] = t_cip_done
         tanks[tk_name]["bosalma_saati"] = t_bosaldi
 
-    # Gece JIT Dolumu: T43 (38T) ve T40 (25T) sabah 08:00'e 2 farklı reçeteyle hazır yetiştirilir
+    # Gece JIT Dolumu: T43 (38T) ve T40 (25T) 2 farklı reçeteyle 08:00'e hazır edilir
     current_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
     sabah_acilis_tanklari = [("T43", 38.0, assigned_types[0]), ("T40", 25.0, assigned_types[1] if len(assigned_types) > 1 else assigned_types[0])]
 
@@ -671,7 +638,6 @@ def gunluk_tank_hazirligi_v80(
     p6_state["musaitlik"] = max(current_p6, gun_baslangic - datetime.timedelta(hours=1.5))
     return tanks, tank_cip_musaitlik
 
-
 def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20.0):
     gunduz_bas = gun_baslangic
     gunduz_bit = gun_baslangic + datetime.timedelta(hours=min(10.0, mesai_saati))
@@ -695,7 +661,6 @@ def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20
     avg_g = max(gunduz_ornekleri) if gunduz_ornekleri else 0
     avg_n = max(gece_ornekleri) if gece_ornekleri else 0
     return avg_g, avg_n
-
 
 def run_scheduler_pipeline(
     excel_source,
@@ -852,7 +817,7 @@ def run_scheduler_pipeline(
         schedule = []
 
         # ==============================================================================
-        # KESİNTİSİZ ÇİZELGELEME MOTORU (P6 VE TANK CIP KISITLI)
+        # KESİNTİSİZ ÇİZELGELEME MOTORU (HATA VE KİLİTLENMELERDEN ARINDIRILMIŞ)
         # ==============================================================================
         while any(o["rem_ton"] > 0.01 for o in order_pool):
             candidate_actions = []
@@ -914,6 +879,7 @@ def run_scheduler_pipeline(
                 ) and o["süt_tipi"] in ready_st_list
             ]
 
+            # Hazır süt yoksa genel bekleyen siparişlerden seç (P6 tetiklemek için)
             if not matching_orders:
                 matching_orders = [
                     o for o in order_pool
@@ -958,7 +924,7 @@ def run_scheduler_pipeline(
                 best_t_name, best_t_info = matching_tanks[0]
                 p_start = max(p_start, best_t_info["hazir_saat"])
             else:
-                # Gün içi boşalan tankı anında sıralı CIP ve P6 dolumuna al
+                # Tank bittiyse JIT olarak doldur (P6 tetikleme)
                 sorted_by_empty = sorted(
                     tanks.items(),
                     key=lambda x: (x[1]["mevcut_sut"] > MIN_SUT_LIMITI_TON, x[1]["bosalma_saati"]),
@@ -1292,9 +1258,6 @@ def run_scheduler_pipeline(
 
     df_kpi = pd.DataFrame(kpi_rows)
 
-    # --------------------------------------------------------------------------
-    # EXCEL ÇIKTISI HAZIRLIĞI
-    # --------------------------------------------------------------------------
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
     thin_border = Border(
@@ -1574,10 +1537,6 @@ def run_scheduler_pipeline(
         "kultur_suresi": kultur_suresi,
     }
 
-
-# ==============================================================================
-# STREAMLIT KULLANICI ARAYÜZÜ (ROL BAZLI DSS VE OPTİMİZASYON)
-# ==============================================================================
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
     "kultur_suresi": 1.5,
@@ -1599,7 +1558,6 @@ if "selected_tab" not in st.session_state:
 if "custom_factory_data" not in st.session_state:
     st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
 
-
 def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
@@ -1608,10 +1566,6 @@ def varsayilana_sifirla():
     st.session_state["selected_tab"] = "📊 Yönetici Özeti"
     st.rerun()
 
-
-# ------------------------------------------------------------------------------
-# SAYFA ÜSTÜ: BAŞLIK
-# ------------------------------------------------------------------------------
 st.title("🏭 Sütaş Karacabey Master Scheduler & DSS")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
@@ -1646,7 +1600,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 1. VERİ KAYNAĞI
     st.header("📂 1. Veri Kaynağı")
     veri_secenekleri = ["Sütaş Karacabey Haftalık Projeksiyon (Varsayılan)", "📁 Kendi Excel Dosyamı Yükle"]
     if st.session_state["is_admin"]:
@@ -1666,7 +1619,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 2. SENARYO & PARAMETRE AYARLARI
     if st.session_state["is_admin"]:
         st.header("🎛️ 2. Senaryo & Parametre Ayarları ✏️")
         st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
@@ -1724,7 +1676,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # HERKESE AÇIK: Dinamik Arıza Simülasyonu
     st.header("⚙️ Dinamik Simülasyon & Arıza")
     with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=True):
         sim_ariza_aktif = st.toggle("🚨 Arıza Simülasyonunu Devreye Al", value=False)
@@ -1748,7 +1699,6 @@ with st.sidebar:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
     st.markdown("---")
-    # HERKESE AÇIK: Değişmeyen Sabit Tesis Kısıtları
     st.header("🔒 Sabit Tesis & Fiziksel Kısıtlar")
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
@@ -1804,9 +1754,6 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
-# ==============================================================================
-# HAM VERİ DÜZENLEME EKRANI (ÜSTTE SİLME, ALTTA EKLEME - ATOMİK FORM)
-# ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
     st.markdown("Aşağıdaki listeden gün seçip mevcut siparişleri silebilir, litrelerini değiştirebilir veya doğrudan yeni sipariş ekleyebilirsiniz:")
@@ -1857,9 +1804,6 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
 
     st.markdown("---")
 
-# ==============================================================================
-# OPTİMİZASYON VE HESAPLAMA MOTORU
-# ==============================================================================
 if "results" not in st.session_state:
     st.session_state["results"] = None
 
@@ -1905,17 +1849,12 @@ if st.session_state["results"] is not None:
     )
     st.markdown("---")
 
-    # TAB YAPILANDIRMASI
     tab_options = ["📊 Yönetici Özeti"]
-    
     if st.session_state["is_admin"]:
         tab_options.extend(["⚖️ Senaryo Kıyaslama (What-If)", "🚀 Maksimum Kapasite & İdeal Miks"])
-
     tab_options.append("🔍 Denetim Logu")
-
     if st.session_state["is_admin"]:
         tab_options.extend(["📈 Darboğaz & Kapasite", "👥 İşgücü Analizi"])
-
     tab_options.extend(["📊 Gantt Şeması", "📅 Günlük Çizelgeler"])
 
     current_tab = st.radio("Görünüm Seçin:", tab_options, horizontal=True, key="selected_tab", label_visibility="collapsed")
@@ -2165,9 +2104,6 @@ if st.session_state["results"] is not None:
             display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi", "op_count"], errors="ignore")
             st.dataframe(display_df, use_container_width=True)
 
-# ------------------------------------------------------------------------------
-# SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
-# ------------------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
     f"""
