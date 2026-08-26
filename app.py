@@ -539,6 +539,7 @@ def gunluk_tank_hazirligi_v80(
     tanks = {}
     tank_list = [("T43", 38.0), ("T40", 25.0), ("T41", 25.0), ("T42", 25.0)]
 
+    # 1. Gün: Hafta başı stoğu olarak tüm tanklar 08:00'de hazır kabul edilir
     if day_idx == 1:
         for idx, (tk_name, cap) in enumerate(tank_list):
             st = assigned_types[idx % len(assigned_types)]
@@ -566,21 +567,28 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
+    # 2. Gün ve Sonrası: Gece 04:00 - 08:00 ve sonrası sıralı dolum/CIP kuyruğu
     sorted_tanks = sorted(
         tank_list,
-        key=lambda item: tank_states.get(item[0], {}).get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6)),
+        key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=6)),
     )
-    night_p6 = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=10))
+    
+    night_p6_tracker = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=4))
+    night_cip_tracker = gun_baslangic - datetime.timedelta(hours=4)
 
     for idx, (tk_name, cap) in enumerate(sorted_tanks):
         st = assigned_types[idx % len(assigned_types)]
         prev_state = tank_states.get(tk_name, {})
-        t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=7))
-        t_cip_done = prev_state.get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=6))
+        t_bosaldi = prev_state.get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=6))
 
-        t_p6_start = max(t_cip_done, night_p6)
-        p6_kuyruk_dk = int((t_p6_start - t_cip_done).total_seconds() / 60)
+        # KISIT 1: Eşzamanlı CIP yapılamaz (Sıralı CIP Kuyruğu)
+        t_cip_start = max(t_bosaldi, night_cip_tracker)
+        t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
+        night_cip_tracker = t_cip_end
 
+        # KISIT 2: Eşzamanlı P6 dolumu yapılamaz (Sıralı P6 Kuyruğu)
+        t_p6_start = max(t_cip_end, night_p6_tracker)
+        
         cip_p6_notu = ""
         if p6_state["kumulatif_ton"] + cap > p6_cip_limit:
             t_p6_start += datetime.timedelta(hours=p6_cip_suresi)
@@ -589,35 +597,38 @@ def gunluk_tank_hazirligi_v80(
 
         dolum_h = cap / p6_debi
         t_p6_end = t_p6_start + datetime.timedelta(hours=dolum_h)
-        night_p6 = t_p6_end
+        night_p6_tracker = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
-        actual_ready = max(gun_baslangic, t_p6_end + datetime.timedelta(hours=kultur_suresi))
-        kultur_bas = actual_ready - datetime.timedelta(hours=kultur_suresi)
+        # KISIT 3: Mayalanma / Kültür Süresi
+        kultur_bas = t_p6_end
+        actual_ready = kultur_bas + datetime.timedelta(hours=kultur_suresi)
+        
+        # 08:00'den önce hazır olanlar 08:00'de başlar, yetişemeyenler bittiği saatte devreye girer
+        effective_ready = max(gun_baslangic, actual_ready)
 
         durum_analizi = ""
-        if p6_kuyruk_dk > 0:
-            durum_analizi = f"⚠️ P6 Hat Kuyruğu: Tank CIP bitişinden itibaren {p6_kuyruk_dk} dk P6 beklenildi."
-            if cip_p6_notu:
-                durum_analizi += f" + {p6_cip_suresi} Sa P6 Yıkama."
+        p6_bekleme_dk = int((t_p6_start - t_cip_end).total_seconds() / 60)
+        if p6_bekleme_dk > 0:
+            durum_analizi += f"⚠️ P6 Dolum Sırası Beklendi: {p6_bekleme_dk} dk.{cip_p6_notu}"
         else:
-            durum_analizi = "✅ P6 hemen müsaitti, CIP sonrası kesintisiz doluma başlandı."
+            durum_analizi += "✅ P6 hemen müsaitti, doluma başlandı."
 
         if actual_ready > gun_baslangic:
             gecikme_dk = int((actual_ready - gun_baslangic).total_seconds() / 60)
-            durum_analizi += f" 👉 08:00'e yetişemedi ({gecikme_dk} dk gecikme: JIT Kültür {kultur_bas.strftime('%H:%M')} -> Hazır {actual_ready.strftime('%H:%M')})."
+            durum_analizi += f" 👉 08:00'e yetişmedi ({gecikme_dk} dk gecikme ile {actual_ready.strftime('%H:%M')}'de hazır)."
         else:
-            durum_analizi += f" 👉 08:00 vardiya başlangıcına zamanında yetişti (JIT Kültür: {kultur_bas.strftime('%H:%M')})."
+            durum_analizi += f" 👉 08:00 vardiya başlangıcına tam zamanında yetişti."
 
         tanks[tk_name] = {
             "kapasite": cap,
             "mevcut_sut": cap,
             "sut_tipi": st,
-            "cip_musait_zaman": t_cip_done,
+            "cip_musait_zaman": t_cip_end,
             "dolum_bitis": t_p6_end,
             "kultur_saati": kultur_bas,
-            "hazir_saat": actual_ready,
-            "bosalma_saati": actual_ready,
+            "hazir_saat": effective_ready,
+            "bosalma_saati": effective_ready,
         }
 
         audit_log_list.append({
@@ -626,14 +637,14 @@ def gunluk_tank_hazirligi_v80(
             "Kapasite (Ton)": cap,
             "Süt Tipi": st,
             "Önceki Gün Boşalma": t_bosaldi.strftime("%d-%m %H:%M"),
-            "Tank CIP Bitiş (Hazır)": t_cip_done.strftime("%d-%m %H:%M"),
+            "Tank CIP Bitiş (Hazır)": t_cip_end.strftime("%d-%m %H:%M"),
             "P6 Dolum Başlangıç": t_p6_start.strftime("%d-%m %H:%M"),
-            "P6 Bitiş (JIT Kültür)": t_p6_end.strftime("%d-%m %H:%M") + cip_p6_notu,
+            "P6 Bitiş (JIT Kültür)": t_p6_end.strftime("%d-%m %H:%M"),
             "Mayalanma Bitiş (Hazır)": actual_ready.strftime("%d-%m %H:%M"),
             "Sistemsel Durum & Bekleme Analizi": durum_analizi,
         })
 
-    p6_state["musaitlik"] = max(night_p6, gun_baslangic)
+    p6_state["musaitlik"] = max(night_p6_tracker, gun_baslangic)
     return tanks
 
 
