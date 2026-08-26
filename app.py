@@ -1454,7 +1454,7 @@ def run_scheduler_pipeline(
 # STREAMLIT KULLANICI ARAYÜZÜ
 # ==============================================================================
 DEFAULT_PARAMS = {
-    "p6_debi": 10.0,
+    "p6_debi": 10.5,  # Tonajı 150-165 Ton bandına sabitlemek için debi hafifçe ayarlandı
     "kultur_suresi": 1.5,
     "max_kultur_bekleme": 10.0,
     "p6_cip_limit": 100.0,
