@@ -20,6 +20,7 @@ import streamlit as st
 # ==============================================================================
 DEVELOPER_NAME = "İlgi Ece Çakmak"
 DEVELOPER_EMAIL = "ilgiececakmak@gmail.com"
+
 # ==============================================================================
 # SAYFA VE GRAFİK YAPILANDIRMASI
 # ==============================================================================
@@ -158,7 +159,7 @@ if st.session_state["auth_user"] is None:
                     gecerli, hata_nedeni = isim_gecerli_mi(temiz_isim)
                     if not gecerli:
                         sheet_log_hatali_deneme(temiz_isim if temiz_isim else "[BOŞ]", "Kullanıcı İsmi", hata_nedeni)
-                        st.error(f"⚠️ Geçersiz İsim Formati: {hata_nedeni} (lütfen adınızı ve soyadınızı girin).")
+                        st.error(f"⚠️ Geçersiz İsim Formatı: {hata_nedeni} (İlk kelime min 3 harf, ikinci kelime min 2 harf olmalı).")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -1725,7 +1726,7 @@ with st.sidebar:
         * **Büyük Kova:** 6.0 Kişi/Saat
         """)
 
-   st.markdown("---")
+    st.markdown("---")
     st.markdown(
         f"""
         <div style="color: #111111; font-weight: bold; font-size: 13px; padding-bottom: 3px;">
@@ -2071,9 +2072,6 @@ if results is not None:
             display_df = df_to_show.drop(columns=["dt_start", "dt_end", "gun_adi"], errors="ignore")
             st.dataframe(display_df, use_container_width=True)
 
-# ------------------------------------------------------------------------------
-# SAYFA EN ALTI: FOOTER
-# ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 # SAYFA EN ALTI: FOOTER
 # ------------------------------------------------------------------------------
