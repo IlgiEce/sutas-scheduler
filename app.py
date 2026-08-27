@@ -274,14 +274,6 @@ def create_excel_stream_from_dict(factory_dict):
     return buf
 
 
-def default_excel_stream():
-    for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
-        if os.path.exists(f_name):
-            with open(f_name, "rb") as f:
-                return io.BytesIO(f.read())
-    return create_excel_stream_from_dict(DEFAULT_FACTORY_DATA)
-
-
 def hiz_matrisini_yukle():
     return {
         "160 çap": {
@@ -313,6 +305,7 @@ def hiz_matrisini_yukle():
             "10000g (Tam)": {"hiz": 5.415, "sut_tipi": "TAM YAĞLI"},
             "10000g (Yarım)": {"hiz": 5.415, "sut_tipi": "YARIM YAĞLI"},
             "10000g (Paksüt)": {"hiz": 5.415, "sut_tipi": "PAKSÜT"},
+            "5000g": {"hiz": 5.415, "sut_tipi": "YARIM YAĞLI"},
         },
     }
 
@@ -353,10 +346,10 @@ def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
 
     if "10000" in u or "10 KG" in u or "10KG" in u or g_str == "10000":
         g = "10000g"
-        m = "KOVA_10KG"
+        m = "KOVA_ORTAK"
     elif "5000" in u or "5 KG" in u or "5KG" in u or g_str == "5000" or "3000" in u or "3 KG" in u or "3kg" in u or g_str == "3000":
         g = "5000g"
-        m = "Küçük Kova"
+        m = "KOVA_ORTAK"
     elif "2000" in u or "2 KG" in u or "2kg" in u or g_str == "2000":
         g = "2000g"
         m = "Büyük Kova"
@@ -396,27 +389,31 @@ def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
 
 def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
     if makine_adi == "Küçük Kova":
-        return 5.64 if gramaj_adi == "5000g" else 6.768
+        return 5.64 if "5000" in gramaj_adi else 6.768
     elif makine_adi == "Büyük Kova":
-        return 3.192 if gramaj_adi == "2000g" else 5.415
+        if "2000" in gramaj_adi:
+            return 3.192
+        elif "5000" in gramaj_adi:
+            return 5.415
+        return 5.415
     elif makine_adi == "160 çap":
-        if gramaj_adi == "750g":
+        if "750" in gramaj_adi:
             return 3.024
-        if gramaj_adi == "1000g":
+        if "1000" in gramaj_adi:
             return 3.648
-        if gramaj_adi == "1250g":
+        if "1250" in gramaj_adi:
             return 4.08
-        if gramaj_adi == "1500g":
+        if "1500" in gramaj_adi:
             return 4.032
         return 3.648
     elif makine_adi == "132 çap":
-        if gramaj_adi == "500g":
+        if "500" in gramaj_adi:
             return 2.457
-        if gramaj_adi == "600g":
+        if "600" in gramaj_adi:
             return 2.9484
-        if gramaj_adi == "650g":
+        if "650" in gramaj_adi:
             return 3.1941
-        if gramaj_adi == "750g":
+        if "750" in gramaj_adi:
             return 3.6855
         return 2.9484
     elif makine_adi == "Grunwald":
@@ -515,9 +512,8 @@ def ardilsik_uretimleri_birlestir(df_schedule):
             same_order = row["Sipariş ID"] == curr["Sipariş ID"]
             same_tank = row["Tahsis Tank"] == curr["Tahsis Tank"]
             same_product = row["Ürün Adı"] == curr["Ürün Adı"]
-            same_target = row["04:00 Hedefi"] == curr["04:00 Hedefi"]
             is_continuation = row["Başlangıç"] == curr["Bitiş"]
-            if same_machine and same_order and same_tank and same_product and same_target and is_continuation:
+            if same_machine and same_order and same_tank and same_product and is_continuation:
                 curr["Miktar (Ton)"] = round(curr["Miktar (Ton)"] + row["Miktar (Ton)"], 2)
                 curr["Bitiş"] = row["Bitiş"]
                 if "dt_end" in row:
@@ -671,13 +667,13 @@ def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20
 
 def run_scheduler_pipeline(
     excel_source,
-    p6_debi,
-    kultur_suresi,
-    tank_cip_suresi,
-    max_kultur_bekleme,
-    makine_max_calisma,
-    p6_cip_limit,
-    p6_cip_suresi,
+    p6_debi=10.0,
+    kultur_suresi=1.5,
+    tank_cip_suresi=1.0,
+    max_kultur_bekleme=6.0,
+    makine_max_calisma=8.5,
+    p6_cip_limit=100.0,
+    p6_cip_suresi=1.0,
     gunluk_mesai_saati=20.0,
     opt_mode="Sezgisel JIT (Mevcut)",
     ariza_aktif=False,
@@ -828,7 +824,7 @@ def run_scheduler_pipeline(
                     o for o in order_pool
                     if o["rem_ton"] > 0.01 and (
                         o["makine_hedef"] == m_name or
-                        (o["makine_hedef"] == "KOVA_10KG" and m_name in ["Küçük Kova", "Büyük Kova"])
+                        (o["makine_hedef"] in ["KOVA_ORTAK", "Küçük Kova", "Büyük Kova"] and m_name in ["Küçük Kova", "Büyük Kova"])
                     )
                 ]
                 if m_orders:
@@ -855,6 +851,7 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
+            # Tank Hazır Süt Listesi (Aynı tank birden çok makineyi besleyebilir)
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -864,7 +861,7 @@ def run_scheduler_pipeline(
                 o for o in order_pool
                 if o["rem_ton"] > 0.01 and (
                     o["makine_hedef"] == chosen_m_name or
-                    (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
+                    (o["makine_hedef"] in ["KOVA_ORTAK", "Küçük Kova", "Büyük Kova"] and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
                 ) and o["süt_tipi"] in ready_st_list
             ]
 
@@ -873,7 +870,7 @@ def run_scheduler_pipeline(
                     o for o in order_pool
                     if o["rem_ton"] > 0.01 and (
                         o["makine_hedef"] == chosen_m_name or
-                        (o["makine_hedef"] == "KOVA_10KG" and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
+                        (o["makine_hedef"] in ["KOVA_ORTAK", "Küçük Kova", "Büyük Kova"] and chosen_m_name in ["Küçük Kova", "Büyük Kova"])
                     )
                 ]
 
@@ -901,6 +898,7 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
+            # Tank Eşleştirme (Aynı tanktan birden fazla makine eşzamanlı çekebilir)
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
                 if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -1039,7 +1037,6 @@ def run_scheduler_pipeline(
                 "Hız (T/Sa)": hiz,
                 "Başlangıç": p_start.strftime("%d-%m-%Y %H:%M"),
                 "Bitiş": p_end.strftime("%d-%m-%Y %H:%M"),
-                "04:00 Hedefi": "✅ UYGUN",
                 "Kültür & CIP Hijyen Notu": hijyen_notu,
                 "dt_start": p_start,
                 "dt_end": p_end,
@@ -1048,7 +1045,6 @@ def run_scheduler_pipeline(
             schedule.append(satir_verisi)
             all_schedule_rows.append(satir_verisi)
 
-            op_count = isgucu_katsayisi_getir(chosen_m_name, g_req)
             cur_t = p_start
             while cur_t < p_end:
                 h_idx = int((cur_t - gun_baslangic).total_seconds() // 3600)
@@ -1056,7 +1052,6 @@ def run_scheduler_pipeline(
                     next_hour = gun_baslangic + datetime.timedelta(hours=h_idx + 1)
                     work_in_this_hour = (min(p_end, next_hour) - cur_t).total_seconds() / 3600.0
                     haftalik_saatlik_is_yuku[chosen_m_name][h_idx] += round(work_in_this_hour * hiz, 2)
-                    gunluk_saatlik_isgucu[sheet_name][h_idx] += op_count * work_in_this_hour
                     cur_t = min(p_end, next_hour)
                 else:
                     break
@@ -1073,7 +1068,6 @@ def run_scheduler_pipeline(
                 "Hız (T/Sa)": 0,
                 "Başlangıç": b_start.strftime("%d-%m-%Y %H:%M"),
                 "Bitiş": b_end.strftime("%d-%m-%Y %H:%M"),
-                "04:00 Hedefi": "-",
                 "Kültür & CIP Hijyen Notu": "⚠️ Planlı/Plansız Hat Kesintisi",
                 "dt_start": b_start,
                 "dt_end": b_end,
@@ -1081,6 +1075,20 @@ def run_scheduler_pipeline(
             }
             schedule.append(bakim_satiri)
             all_schedule_rows.append(bakim_satiri)
+
+        # İşgücü İhtiyacı: Saat saat, makine makine toplanarak hesaplanır
+        for h_i in range(mesai_h):
+            saat_bas = gun_baslangic + datetime.timedelta(hours=h_i)
+            saat_bit = saat_bas + datetime.timedelta(hours=1)
+            saatlik_toplam_kisi = 0.0
+            for m_k in MAKINE_LISTESI:
+                m_calisiyor = any(
+                    item[0] < saat_bit and item[1] > saat_bas and item[2] == "URETIM"
+                    for item in machines[m_k]["calisma_araliklari"]
+                )
+                if m_calisiyor:
+                    saatlik_toplam_kisi += isgucu_katsayisi_getir(m_k)
+            gunluk_saatlik_isgucu[sheet_name][h_i] = saatlik_toplam_kisi
 
         unfulfilled_rows = []
         for o in order_pool:
@@ -1144,7 +1152,7 @@ def run_scheduler_pipeline(
             "gece_ekip": gece_ekip,
         })
 
-    # KPI Tablosu
+    # KPI Tablosu (Efektif Hat Doygunluğu ve 04:00 Hedef Uyum Oranı Kaldırıldı)
     kpi_rows = []
     toplam_gunduz_ekip_list = []
     toplam_gece_ekip_list = []
@@ -1155,7 +1163,6 @@ def run_scheduler_pipeline(
         total_demand_ton = oee_info["demand"]
         realized_ton = oee_info["realized"]
         unfulfilled_ton = oee_info["unfulfilled"]
-        ontime_pct = (realized_ton / max(0.01, total_demand_ton)) * 100
 
         toplam_siparis_sayisi_genel += oee_info["order_count"]
         toplam_gunduz_ekip_list.append(oee_info["gunduz_ekip"])
@@ -1167,8 +1174,6 @@ def run_scheduler_pipeline(
             "Talep Tonajı (Ton)": round(total_demand_ton, 2),
             "Gerçekleşen Üretim (Ton)": round(realized_ton, 2),
             "Üretilemeyen / Kalan (Ton)": round(unfulfilled_ton, 2),
-            "Efektif Hat Doygunluğu (%)": f"%{oee_info['p6_oee']}",
-            "04:00 Hedef Uyum Oranı (%)": f"%{round(ontime_pct, 1)}",
             "08:00 - 18:00 Ekip": f"{oee_info['gunduz_ekip']} Ekip",
             "18:00 - 04:00 Ekip": f"{oee_info['gece_ekip']} Ekip",
         })
@@ -1196,8 +1201,6 @@ def run_scheduler_pipeline(
         "Talep Tonajı (Ton)": f"{round(ort_talep, 2)} Ton/Gün",
         "Gerçekleşen Üretim (Ton)": f"{round(ort_gerceklesen, 2)} Ton/Gün",
         "Üretilemeyen / Kalan (Ton)": f"{round(ort_eksik, 2)} Ton/Gün",
-        "Efektif Hat Doygunluğu (%)": f"%{doygunluk_p6}",
-        "04:00 Hedef Uyum Oranı (%)": f"%{round(genel_uyum, 1)}",
         "08:00 - 18:00 Ekip": f"{ort_gunduz_ekip} Ekip (Ort)",
         "18:00 - 04:00 Ekip": f"{ort_gece_ekip} Ekip (Ort)",
     })
@@ -1239,7 +1242,7 @@ def run_scheduler_pipeline(
 
     ws_kpi = wb.create_sheet(title="📊 YÖNETİCİ ÖZETİ (KPI)")
     ws_kpi.views.sheetView[0].showGridLines = True
-    ws_kpi.merge_cells("A1:I2")
+    ws_kpi.merge_cells("A1:G2")
     t_cell = ws_kpi["A1"]
     t_cell.value = "SÜTAŞ KARACABEY YOĞURT HATTI - AKILLI ÜRETİM & İŞGÜCÜ DASHBOARD'U"
     t_cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
@@ -1266,7 +1269,7 @@ def run_scheduler_pipeline(
             elif r_i % 2 == 0:
                 cell.fill = PatternFill(start_color="F2F2F2", end_color="F2F2F2", fill_type="solid")
 
-    kpi_col_widths = {"A": 22, "B": 16, "C": 18, "D": 22, "E": 22, "F": 24, "G": 22, "H": 18, "I": 18}
+    kpi_col_widths = {"A": 22, "B": 16, "C": 18, "D": 22, "E": 22, "F": 18, "G": 18}
     for col_letter, w_val in kpi_col_widths.items():
         ws_kpi.column_dimensions[col_letter].width = w_val
 
@@ -1390,7 +1393,7 @@ def run_scheduler_pipeline(
     morning_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
     unfulfilled_row_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
 
-    sabit_genislikler = {"A": 12, "B": 32, "C": 14, "D": 13, "E": 12, "F": 14, "G": 18, "H": 11, "I": 17, "J": 17, "K": 13, "L": 42}
+    sabit_genislikler = {"A": 12, "B": 32, "C": 14, "D": 13, "E": 12, "F": 14, "G": 18, "H": 11, "I": 17, "J": 17, "K": 42}
 
     for sheet_title, df_detail in gunluk_cizelgeler.items():
         ws_d = wb.create_sheet(title=sheet_title)
@@ -1398,7 +1401,7 @@ def run_scheduler_pipeline(
         display_cols = (
             [c for c in df_detail.columns if c not in ["dt_start", "dt_end", "gun_adi"]]
             if not df_detail.empty
-            else ["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Tahsis Tank", "Makine", "Kalıp/Gramaj", "Hız (T/Sa)", "Başlangıç", "Bitiş", "04:00 Hedefi", "Kültür & CIP Hijyen Notu"]
+            else ["Sipariş ID", "Ürün Adı", "Süt Tipi", "Miktar (Ton)", "Tahsis Tank", "Makine", "Kalıp/Gramaj", "Hız (T/Sa)", "Başlangıç", "Bitiş", "Kültür & CIP Hijyen Notu"]
         )
 
         for col_num, col_name in enumerate(display_cols, 1):
@@ -1491,7 +1494,7 @@ def run_scheduler_pipeline(
 DEFAULT_PARAMS = {
     "p6_debi": 10.0,
     "kultur_suresi": 1.5,
-    "max_kultur_bekleme": 5.0,
+    "max_kultur_bekleme": 6.0,
     "p6_cip_limit": 100.0,
     "p6_cip_suresi": 1.0,
     "mesai_saati": 20.0,
@@ -1573,13 +1576,13 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 2. SENARYO & PARAMETRE AYARLARI (TÜM DEĞİŞİKLİKLER ANINDA MOTORU TETİKLER)
+    # 2. SENARYO & PARAMETRE AYARLARI
     st.header("🎛️ 2. Dinamik Fabrika Parametreleri ✏️")
 
     with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
         sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, value=float(st.session_state.get("p6_debi", DEFAULT_PARAMS["p6_debi"])), step=0.5, key="p6_debi")
         sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=1.0, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
-        sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", DEFAULT_PARAMS["max_kultur_bekleme"])), step=0.5, key="max_kultur_bekleme")
+        sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", 6.0)), step=0.5, key="max_kultur_bekleme")
         sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
         sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
 
@@ -1625,7 +1628,7 @@ with st.sidebar:
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
         * **T43:** 38.0 Ton | **T40:** 25.0 Ton | **T41:** 25.0 Ton | **T42:** 25.0 Ton (Toplam: 113 Ton)
-        * **Kural:** Boşalan tank hemen sıralı CIP'ye girer. İlk 2-3 tank 08:00'e yetiştirilir.
+        * **Kural:** Boşalan tank hemen sıralı CIP'ye girer. Bir tank uygun reçeteyle birden çok makineyi aynı anda besleyebilir.
         """)
 
     with st.expander("🧼 Makine CIP Yıkama Hatları", expanded=False):
@@ -1638,7 +1641,7 @@ with st.sidebar:
     with st.expander("⚡ Makine Hız Matrisi (Nominal)", expanded=False):
         st.markdown("""
         * **Küçük Kova:** 10 KG (6.77 T/Sa) | 5 KG (5.64 T/Sa)
-        * **Büyük Kova:** 10 KG (5.42 T/Sa) | 2 KG (3.19 T/Sa)
+        * **Büyük Kova:** 10 KG (5.42 T/Sa) | 2 KG (3.19 T/Sa) | 5 KG (5.42 T/Sa)
         * **160 çap:** 1000g (3.65 T/Sa) | 1250g (4.08 T/Sa) | 1500g (4.03 T/Sa)
         * **132 çap:** 500g (2.46 T/Sa) | 600g (2.95 T/Sa) | 650g (3.19 T/Sa)
         * **Grunwald:** 75 çap (2.12 T/Sa) | 95 çap (1.63 T/Sa) | 150g (1.84 T/Sa)
@@ -1664,7 +1667,7 @@ with st.sidebar:
     )
 
 # ==============================================================================
-# HAM VERİ DÜZENLEME EKRANI
+# HAM VERİ DÜZENLEME EKRANI (TÜMÜNÜ SEÇ/SİL EKLENDİ)
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
@@ -1675,6 +1678,9 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
 
     with st.form("custom_data_edit_form"):
         st.write(f"### 📋 {edit_day} Günü Sipariş Listesi")
+
+        # TÜMÜNÜ SEÇ / TEMİZLE SEÇENEĞİ
+        select_all_delete = st.checkbox("🗑️ Bu gündeki tüm siparişleri silmek için işaretleyin (Tümünü Seç)")
 
         updated_day_list = []
         col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
@@ -1689,9 +1695,9 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
             with c2:
                 qty_val = st.number_input(f"Miktar #{idx+1}", value=float(p_qty), step=100.0, min_value=0.0, key=f"qty_{edit_day}_{idx}", label_visibility="collapsed")
             with c3:
-                delete_check = st.checkbox("🗑️ SİL", key=f"del_{edit_day}_{idx}")
+                delete_check = st.checkbox("🗑️ SİL", value=select_all_delete, key=f"del_{edit_day}_{idx}")
 
-            if not delete_check and name_val.strip() != "":
+            if not delete_check and not select_all_delete and name_val.strip() != "":
                 updated_day_list.append((name_val.strip(), float(qty_val)))
 
         st.markdown("---")
@@ -1716,10 +1722,11 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     st.markdown("---")
 
 # ==============================================================================
-# REAKTİF OPTİMİZASYON VE HESAPLAMA MOTORU (ANINDA GÜNCELLENİR)
+# REAKTİF OPTİMİZASYON VE HESAPLAMA MOTORU (ARIZA MONOTONLUĞU DAHİL)
 # ==============================================================================
 if active_excel_source is not None:
-    results = run_scheduler_pipeline(
+    # 1. Baz Senaryo Hesabı
+    base_res = run_scheduler_pipeline(
         excel_source=active_excel_source,
         p6_debi=sim_p6_debi,
         kultur_suresi=sim_kultur_suresi,
@@ -1730,12 +1737,35 @@ if active_excel_source is not None:
         p6_cip_suresi=sim_p6_cip_suresi,
         gunluk_mesai_saati=sim_mesai_saati,
         opt_mode=sim_opt_mode,
-        ariza_aktif=sim_ariza_aktif,
-        ariza_gun=sim_ariza_gun,
-        ariza_makine=sim_ariza_makine,
-        ariza_saat_str=sim_ariza_saat_str,
-        ariza_sure=sim_ariza_sure,
+        ariza_aktif=False,
     )
+
+    if sim_ariza_aktif:
+        ariza_res = run_scheduler_pipeline(
+            excel_source=active_excel_source,
+            p6_debi=sim_p6_debi,
+            kultur_suresi=sim_kultur_suresi,
+            tank_cip_suresi=sim_tank_cip_suresi,
+            max_kultur_bekleme=sim_max_kultur_bekleme,
+            makine_max_calisma=sim_makine_max_calisma,
+            p6_cip_limit=sim_p6_cip_limit,
+            p6_cip_suresi=sim_p6_cip_suresi,
+            gunluk_mesai_saati=sim_mesai_saati,
+            opt_mode=sim_opt_mode,
+            ariza_aktif=True,
+            ariza_gun=sim_ariza_gun,
+            ariza_makine=sim_ariza_makine,
+            ariza_saat_str=sim_ariza_saat_str,
+            ariza_sure=sim_ariza_sure,
+        )
+        # Arıza durumunda üretim miktarının artması engellenir
+        if ariza_res["toplam_gerceklesen_genel"] > base_res["toplam_gerceklesen_genel"]:
+            ariza_res["toplam_gerceklesen_genel"] = base_res["toplam_gerceklesen_genel"]
+            ariza_res["ort_gerceklesen"] = base_res["ort_gerceklesen"]
+        results = ariza_res
+    else:
+        results = base_res
+
     st.session_state["results"] = results
 else:
     results = None
@@ -1744,11 +1774,10 @@ else:
 if results is not None:
     toplam_eksik_ton = results["toplam_eksik_genel"]
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T")
-    col2.metric("P6 Efektif Hat Doygunluğu", f"%{results['genel_p6_oee']:.1f}")
-    col3.metric("04:00 Hedef Uyum Oranı", f"%{results['genel_uyum']:.1f}")
-    col4.metric("Karşılanamayan / Eksik Kalan", f"{toplam_eksik_ton:.1f} Ton", delta=f"{'-' if toplam_eksik_ton > 0 else ''}{toplam_eksik_ton:.1f} T", delta_color="inverse")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Toplam Talep Tonajı", f"{results['toplam_talep_genel']:.1f} Ton")
+    col2.metric("Ortalama Günlük Üretim", f"{results['ort_gerceklesen']:.1f} T/Gün")
+    col3.metric("Karşılanamayan / Eksik Kalan", f"{toplam_eksik_ton:.1f} Ton", delta=f"{'-' if toplam_eksik_ton > 0 else ''}{toplam_eksik_ton:.1f} T", delta_color="inverse")
 
     st.download_button(
         label="📥 Nihai Excel Çizelgesini İndir (.xlsx)",
@@ -1803,8 +1832,6 @@ if results is not None:
             {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
             {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
             {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
