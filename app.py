@@ -33,7 +33,7 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
-ADMIN_PIN = "2026"  # 4 Haneli Yönetici Şifresi
+ADMIN_PIN = "2026"
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -59,7 +59,7 @@ def sheet_log_kaydet(kullanici_etiketi: str):
                 df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
         except Exception:
             df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
-        
+
         df_log = df_log.dropna(how="all")
         new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": kullanici_etiketi}])
         df_updated = pd.concat([df_log, new_row], ignore_index=True)
@@ -76,18 +76,17 @@ if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
 
 if st.session_state["auth_user"] is None:
-    # Sayfa ortasında derli toplu giriş kartı
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    
+
     with col_l2:
         st.markdown("## 🏭 Sütaş Karacabey Scheduler & DSS")
-        
+
         if not st.session_state["admin_login_mode"]:
             st.info("Sisteme erişebilmek için lütfen adınızı ve soyadınızı girip Enter'a basınız.")
             with st.form("login_form", clear_on_submit=False):
                 user_name = st.text_input("Ad Soyad:", placeholder="örn: Ahmet Yılmaz")
                 submit_btn = st.form_submit_button("Sisteme Giriş Yap ↵", use_container_width=True, type="primary")
-                
+
                 if submit_btn:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
@@ -109,7 +108,7 @@ if st.session_state["auth_user"] is None:
                 admin_name = st.text_input("Yönetici Ad Soyad:", placeholder="örn: Sistem Yöneticisi")
                 pin_input = st.text_input("4 Haneli Yönetici Kodunu Giriniz:", type="password", max_chars=4)
                 admin_submit = st.form_submit_button("Yetkiyi Doğrula ve Giriş Yap ↵", use_container_width=True, type="primary")
-                
+
                 if admin_submit:
                     temiz_isim = admin_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
@@ -321,13 +320,13 @@ def hiz_matrisini_yukle():
 MAKINE_HIZLARI = hiz_matrisini_yukle()
 
 
-def isgucu_katsayisi_getir(makine_adi, gramaj_adi):
+def isgucu_katsayisi_getir(makine_adi, gramaj_adi=""):
     if makine_adi == "160 çap":
         return 4.0
     elif makine_adi == "132 çap":
         return 5.0
     elif makine_adi == "Grunwald":
-        return 5.0 if "95" in str(gramaj_adi) else 3.0
+        return 4.0
     elif makine_adi == "Küçük Kova":
         return 5.0
     elif makine_adi == "Büyük Kova":
@@ -712,6 +711,18 @@ def run_scheduler_pipeline(
 
     p6_state = {"musaitlik": baslangic_gunu - datetime.timedelta(hours=6), "kumulatif_ton": 0.0}
 
+    # Haftalık kümülatif makine durumları ve CIP hatları takibi
+    global_machines_state = {
+        m: {
+            "ardisik_calisma_saat": 0.0,
+            "gunluk_toplam_calisma": 0.0,
+            "son_islem_zamani": baslangic_gunu - datetime.timedelta(hours=10),
+        }
+        for m in MAKINE_LISTESI
+    }
+    global_cip_hatlari_musaitlik = {"HAT_1": baslangic_gunu - datetime.timedelta(hours=10), "HAT_2": baslangic_gunu - datetime.timedelta(hours=10)}
+    tank_cip_musaitlik = baslangic_gunu - datetime.timedelta(hours=6)
+
     oee_raporu = []
     toplam_talep_genel = 0.0
     toplam_gerceklesen_genel = 0.0
@@ -729,8 +740,8 @@ def run_scheduler_pipeline(
 
         demand_by_type = {}
         for s in siparisler:
-            st = s["süt_tipi"]
-            demand_by_type[st] = demand_by_type.get(st, 0.0) + s["tonaj_ton"]
+            st_val = s["süt_tipi"]
+            demand_by_type[st_val] = demand_by_type.get(st_val, 0.0) + s["tonaj_ton"]
 
         sorted_types = sorted(demand_by_type.keys(), key=lambda k: -demand_by_type[k])
         assigned_types = []
@@ -762,12 +773,16 @@ def run_scheduler_pipeline(
         machines = {
             m: {
                 "musait_zamani": gun_baslangic,
-                "ardisik_calisma_saat": 0.0,
+                "ardisik_calisma_saat": global_machines_state[m]["ardisik_calisma_saat"],
                 "gunluk_toplam_calisma": 0.0,
                 "calisma_araliklari": [],
             }
             for m in MAKINE_LISTESI
         }
+
+        # Gün geçişinde CIP hatları günün başlangıcıyla senkronize edilir
+        for h_k in global_cip_hatlari_musaitlik:
+            global_cip_hatlari_musaitlik[h_k] = max(gun_baslangic, global_cip_hatlari_musaitlik[h_k])
 
         is_ariza_gunu = ariza_aktif and (sheet_name.lower().strip() == ariza_gun.lower().strip())
         b_start = None
@@ -781,9 +796,6 @@ def run_scheduler_pipeline(
                 machines[ariza_makine]["calisma_araliklari"].append((b_start, b_end, "ARIZA ⚠️"))
             except Exception:
                 is_ariza_gunu = False
-
-        cip_hatlari_musaitlik = {"HAT_1": gun_baslangic, "HAT_2": gun_baslangic}
-        tank_cip_musaitlik = gun_baslangic - datetime.timedelta(hours=6)
 
         order_pool = []
         for s in siparisler:
@@ -880,17 +892,38 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
+            # Makine CIP Kontrolü (Haftalık çalışma limitine göre)
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
-                cip_baslangic = max(p_start, cip_hatlari_musaitlik[hat])
+                cip_baslangic = max(p_start, global_cip_hatlari_musaitlik[hat])
                 cip_bitis = cip_baslangic + datetime.timedelta(minutes=cip_sure_dk)
-                cip_hatlari_musaitlik[hat] = cip_bitis
+                global_cip_hatlari_musaitlik[hat] = cip_bitis
 
                 m_info["ardisik_calisma_saat"] = 0.0
                 m_info["calisma_araliklari"].append((cip_baslangic, cip_bitis, "CIP"))
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
+
+                cip_kaydi = {
+                    "Sipariş ID": "CIP-MAKİNE",
+                    "Ürün Adı": f"🧼 {chosen_m_name} CIP YIKAMASI",
+                    "Süt Tipi": "CIP",
+                    "Miktar (Ton)": 0.0,
+                    "Tahsis Tank": "-",
+                    "Makine": chosen_m_name,
+                    "Kalıp/Gramaj": "-",
+                    "Hız (T/Sa)": 0.0,
+                    "Başlangıç": cip_baslangic.strftime("%d-%m-%Y %H:%M"),
+                    "Bitiş": cip_bitis.strftime("%d-%m-%Y %H:%M"),
+                    "04:00 Hedefi": "✅ UYGUN",
+                    "Kültür & CIP Hijyen Notu": f"🧼 {chosen_m_name} Periyodik Yıkama ({cip_sure_dk} dk)",
+                    "dt_start": cip_baslangic,
+                    "dt_end": cip_bitis,
+                    "gun_adi": sheet_name,
+                }
+                schedule.append(cip_kaydi)
+                all_schedule_rows.append(cip_kaydi)
 
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
@@ -999,6 +1032,9 @@ def run_scheduler_pipeline(
             machines[chosen_m_name]["gunluk_toplam_calisma"] += p_dur_h
             machines[chosen_m_name]["calisma_araliklari"].append((p_start, p_end, "URETIM"))
 
+            global_machines_state[chosen_m_name]["ardisik_calisma_saat"] = machines[chosen_m_name]["ardisik_calisma_saat"]
+            global_machines_state[chosen_m_name]["son_islem_zamani"] = p_end
+
             tank_states[best_t_name]["bosalma_saati"] = max(tank_states[best_t_name]["bosalma_saati"], p_end)
             tank_states[best_t_name]["cip_musait_zaman"] = max(
                 tank_states[best_t_name]["cip_musait_zaman"],
@@ -1076,7 +1112,7 @@ def run_scheduler_pipeline(
                     "Talep Edilen (Ton)": round(o["orijinal_ton"], 2),
                     "Üretilebilen (Ton)": uretilen,
                     "Eksik Kalan (Ton)": round(o["rem_ton"], 2),
-                    "Kalan Neden / Durum": "⚠️ 04:00 Mesai Penceresi Doldu / Günlük Kapasite Tavanı",
+                    "Kalan Neden / Durum": "⚠️ 04:00 Mesai Penceresi Doldu / Günlük Kapasite & CIP Tavanı",
                 })
 
         total_day_demand = sum(s["tonaj_ton"] for s in siparisler)
@@ -1092,7 +1128,7 @@ def run_scheduler_pipeline(
                 m_ton = df_merged[df_merged["Makine"] == m]["Miktar (Ton)"].sum()
                 gunluk_makine_istatistikleri[m] += m_ton
             for st_val in df_merged["Süt Tipi"].unique():
-                if st_val != "DURUŞ":
+                if st_val not in ["DURUŞ", "CIP"]:
                     st_ton = df_merged[df_merged["Süt Tipi"] == st_val]["Miktar (Ton)"].sum()
                     gunluk_sut_istatistikleri[st_val] = gunluk_sut_istatistikleri.get(st_val, 0.0) + st_ton
 
@@ -1515,13 +1551,12 @@ st.title("🏭 Sütaş Karacabey Master Scheduler & DSS")
 st.markdown("Tesis kapasite sınırlarına, işgücüne ve CIP döngülerine uygun haftalık üretim, çizelgeleme ve karar destek motoru.")
 
 with st.sidebar:
-    # 🏠 ANASAYFAYA DÖN / SIFIRLA BUTONU
     if st.button("🏠 Anasayfa & Varsayılana Dön", use_container_width=True, type="secondary"):
         varsayilana_sifirla()
 
     st.markdown("---")
     st.markdown("## 🏭 Fabrika Kontrol Paneli")
-    
+
     if st.session_state["is_admin"]:
         st.success("👑 **Yönetici Modu Açık**")
         if st.button("🔄 Normal Kullanıcı Moduna Dön", use_container_width=True):
@@ -1646,7 +1681,7 @@ with st.sidebar:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
     st.markdown("---")
-    # HERKESE AÇIK: Değişmeyen Sabit Tesis Kısıtları
+    # Sabit Tesis Kısıtları
     st.header("🔒 Sabit Tesis & Fiziksel Kısıtlar")
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
@@ -1655,7 +1690,7 @@ with st.sidebar:
         * **T41:** 25.0 Ton
         * **T42:** 25.0 Ton
         * **Toplam Kapasite:** 113.0 Ton
-        * **Asgari Parti Kuralı:** Tanklar boşaldığında minimum 25 Ton parti büyüklüğüyle doldurulur (tam parti mayalama prensibi).
+        * **Asgari Parti Kuralı:** Tanklar boşaldığında minimum 25 Ton parti büyüklüğüyle doldurulur.
         """)
 
     with st.expander("🧼 Makine CIP Yıkama Hatları", expanded=False):
@@ -1683,7 +1718,7 @@ with st.sidebar:
         st.markdown("""
         * **160 çap:** 4.0 Operatör/Saat
         * **132 çap:** 5.0 Operatör/Saat
-        * **Grunwald:** 3.0 Operatör/Saat (95 çap: 5.0)
+        * **Grunwald:** 4.0 Operatör/Saat
         * **Küçük Kova:** 5.0 Operatör/Saat
         * **Büyük Kova:** 6.0 Operatör/Saat
         * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
@@ -1703,7 +1738,7 @@ with st.sidebar:
     )
 
 # ==============================================================================
-# HAM VERİ DÜZENLEME EKRANI (YÖNETİCİ MODUNDA SEÇİLDİĞİNDE AÇILIR)
+# HAM VERİ DÜZENLEME EKRANI
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
@@ -1714,7 +1749,7 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
 
     with st.form("custom_data_edit_form"):
         st.write(f"### 📋 {edit_day} Günü Sipariş Listesi")
-        
+
         updated_day_list = []
         col_h1, col_h2, col_h3 = st.columns([5, 3, 2])
         col_h1.markdown("**Ürün Açıklaması**")
@@ -1762,7 +1797,7 @@ if "results" not in st.session_state:
 
 if active_excel_source is not None:
     if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run", use_container_width=True):
-        with st.spinner("Matematiksel kısıtlar, arızalar ve güncel siparişler hesaplanıyor..."):
+        with st.spinner("Matematiksel kısıtlar, CIP döngüleri ve güncel siparişler hesaplanıyor..."):
             st.session_state["results"] = run_scheduler_pipeline(
                 excel_source=active_excel_source,
                 p6_debi=sim_p6_debi,
@@ -1802,9 +1837,8 @@ if st.session_state["results"] is not None:
     )
     st.markdown("---")
 
-    # TAB YAPILANDIRMASI
     tab_options = ["📊 Yönetici Özeti"]
-    
+
     if st.session_state["is_admin"]:
         tab_options.append("⚖️ Senaryo Kıyaslama (What-If)")
 
@@ -1819,7 +1853,7 @@ if st.session_state["results"] is not None:
 
     if current_tab == "📊 Yönetici Özeti":
         if toplam_eksik_ton > 0.05:
-            st.error(f"🚨 **KRİTİK KAPASİTE UYARISI:** Bu hafta P6 pastörizatör ve tesis darboğazı nedeniyle **{toplam_eksik_ton:.1f} Ton** sipariş karşılanamadı / 04:00 mesai sınırına takıldı.")
+            st.error(f"🚨 **KRİTİK KAPASİTE UYARISI:** Bu hafta P6 pastörizatör, CIP ve hat kısıtları nedeniyle **{toplam_eksik_ton:.1f} Ton** sipariş karşılanamadı / 04:00 mesai sınırına takıldı.")
         else:
             st.success("✅ **MÜKEMMEL OPERASYONEL PERFORMANS:** Bu haftaki tüm siparişler 04:00 mesai penceresi dolmadan %100 oranında eksiksiz karşılandı. Karşılanamayan sipariş: **0.0 Ton**")
         st.subheader("Haftalık & Günlük KPI Tablosu")
@@ -1942,8 +1976,8 @@ if st.session_state["results"] is not None:
             secilen_gantt_gun = st.selectbox("Gantt Şemasını Görüntülemek İstediğiniz Günü Seçin:", gun_isimleri_gantt, key="gantt_day_sel")
             df_gantt_filtered = df_gantt_all[df_gantt_all["gun_adi"] == secilen_gantt_gun].copy()
 
-            g_tonaj = df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"]["Miktar (Ton)"].sum()
-            g_parti = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] != "DURUŞ"])
+            g_tonaj = df_gantt_filtered[~df_gantt_filtered["Süt Tipi"].isin(["DURUŞ", "CIP"])]["Miktar (Ton)"].sum()
+            g_parti = len(df_gantt_filtered[~df_gantt_filtered["Süt Tipi"].isin(["DURUŞ", "CIP"])])
             g_ariza = len(df_gantt_filtered[df_gantt_filtered["Süt Tipi"] == "DURUŞ"])
 
             cg1, cg2, cg3, cg4 = st.columns(4)
@@ -1958,6 +1992,7 @@ if st.session_state["results"] is not None:
                 "%5 YAĞLI": "#548235",
                 "PAKSÜT": "#C55A11",
                 "DURUŞ": "#C00000",
+                "CIP": "#FFC000",
             }
 
             fig_plotly = px.timeline(
@@ -2013,7 +2048,7 @@ if st.session_state["results"] is not None:
             st.dataframe(display_df, use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# SAYFA EN ALTI: SİLİNEMEZ TELİF VE GELİŞTİRİCİ FOOTER'I
+# SAYFA EN ALTI: FOOTER
 # ------------------------------------------------------------------------------
 st.markdown("---")
 st.markdown(
