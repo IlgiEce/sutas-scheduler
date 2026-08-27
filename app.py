@@ -569,35 +569,31 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
+    # Tankları boşalma saatine göre sırala
     sorted_tanks = sorted(
         tank_list,
-        key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14)),
+        key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=24)),
     )
     
-    current_tank_cip_available = max(
-        gun_baslangic - datetime.timedelta(hours=14),
-        max(ts.get("cip_musait_zaman", gun_baslangic - datetime.timedelta(hours=14)) for ts in tank_states.values())
+    # CIP devresi başlangıcı: En erken boşalan tankın saati
+    current_tank_cip_available = min(
+        tank_states.get(t[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=24))
+        for t in sorted_tanks
     )
-    current_p6_available = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=14))
-
-    total_prep_hours_first_2 = (sorted_tanks[0][1] + sorted_tanks[1][1]) / p6_debi + kultur_suresi
-    earliest_night_start = gun_baslangic - datetime.timedelta(hours=total_prep_hours_first_2)
+    current_p6_available = p6_state.get("musaitlik", gun_baslangic - datetime.timedelta(hours=24))
 
     for idx, (tk_name, cap) in enumerate(sorted_tanks):
         st_req = assigned_types[idx % len(assigned_types)]
-        t_bosaldi = tank_states.get(tk_name, {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14))
+        t_bosaldi = tank_states.get(tk_name, {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=24))
         
+        # 1. Tank boşaldığı an hemen CIP devresine girer (Eşzamanlı çakışma engeliyle)
         t_cip_start = max(t_bosaldi, current_tank_cip_available)
         t_cip_done = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
         current_tank_cip_available = t_cip_done
 
+        # 2. P6 Dolumu: CIP bittiğinde ve P6 müsait olduğunda başlar
         dolum_h = cap / p6_debi
-        t_p6_earliest = max(t_cip_done, current_p6_available)
-
-        if idx < 2:
-            t_p6_start = max(t_p6_earliest, earliest_night_start)
-        else:
-            t_p6_start = t_p6_earliest
+        t_p6_start = max(t_cip_done, current_p6_available)
 
         cip_p6_notu = ""
         if p6_state["kumulatif_ton"] + cap > p6_cip_limit:
@@ -609,9 +605,10 @@ def gunluk_tank_hazirligi_v80(
         current_p6_available = t_p6_end
         p6_state["kumulatif_ton"] += cap
 
+        # 3. Mayalanma süreci
         actual_ready = t_p6_end + datetime.timedelta(hours=kultur_suresi)
-        if idx < 2 and actual_ready < gun_baslangic:
-            actual_ready = gun_baslangic
+        if actual_ready < gun_baslangic:
+            actual_ready = gun_baslangic  # Sabah 08:00'den önce hazır olanlar vardiya başına kilitlenir
 
         tanks[tk_name] = {
             "kapasite": cap,
