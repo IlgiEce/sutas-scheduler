@@ -31,12 +31,10 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
-# ==============================================================================
-# ==============================================================================
 # KULLANICI DOĞRULAMA VE OTURUM SÜRESİ LOGLAMA SİSTEMİ
 # ==============================================================================
 ADMIN_PIN = "2026"
+
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -58,6 +56,7 @@ def sheet_log_giris(kullanici_etiketi: str) -> str:
     session_id = f"{kullanici_etiketi}_{int(turkiye_saati.timestamp())}"
     try:
         from streamlit_gsheets import GSheetsConnection
+
         conn = st.connection("gsheets", type=GSheetsConnection)
         try:
             df_log = conn.read(ttl=0)
@@ -66,7 +65,6 @@ def sheet_log_giris(kullanici_etiketi: str) -> str:
         except Exception:
             df_log = pd.DataFrame(columns=["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"])
 
-        # Eksik sütun kontrolü
         for col in ["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"]:
             if col not in df_log.columns:
                 df_log[col] = ""
@@ -77,7 +75,7 @@ def sheet_log_giris(kullanici_etiketi: str) -> str:
             "Giriş Zamanı": log_time,
             "Kullanıcı": kullanici_etiketi,
             "Son Görülme": log_time,
-            "Oturum Süresi": "0 dk 0 sn"
+            "Oturum Süresi": "0 dk 0 sn",
         }])
         df_updated = pd.concat([df_log, new_row], ignore_index=True)
         conn.update(data=df_updated)
@@ -104,6 +102,7 @@ def sheet_log_guncelle():
 
     try:
         from streamlit_gsheets import GSheetsConnection
+
         conn = st.connection("gsheets", type=GSheetsConnection)
         df_log = conn.read(ttl=0)
         if df_log is not None and not df_log.empty and "Session_ID" in df_log.columns:
@@ -114,6 +113,7 @@ def sheet_log_guncelle():
                 conn.update(data=df_log)
     except Exception:
         pass
+
 
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
@@ -141,7 +141,7 @@ if st.session_state["auth_user"] is None:
                 if submit_btn:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk isim min 3 harf, soyisim min 2 harf olmalı, rakam/sembol içeremez).")
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk kelime min 3 harf, ikinci kelime min 2 harf olmalıdır).")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -181,8 +181,9 @@ if st.session_state["auth_user"] is None:
 
     st.stop()
 
-# Kullanıcı giriş yaptıktan sonra her rerun'da logdaki aktiflik süresi güncellenir
+# Sayfa her yenilendiğinde aktif kalma süresini güncelle
 sheet_log_guncelle()
+
 # ==============================================================================
 # MODEL VE PARAMETRE TANIMLARI
 # ==============================================================================
@@ -1597,7 +1598,7 @@ with st.sidebar:
                 if elevate_pin == ADMIN_PIN:
                     st.session_state["is_admin"] = True
                     st.session_state["auth_user"] = f"{st.session_state['auth_user']} (Yönetici)"
-                    sheet_log_kaydet(f"{st.session_state['auth_user']} [Mod Yükseltme]")
+                    sheet_log_giris(f"{st.session_state['auth_user']} [Mod Yükseltme]")
                     st.rerun()
                 else:
                     st.error("❌ Hatalı PIN!")
@@ -1726,7 +1727,6 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     edit_day = st.selectbox("📅 Düzenlenecek Günü Seçin:", list(st.session_state["custom_factory_data"].keys()))
     current_day_orders = list(st.session_state["custom_factory_data"][edit_day])
 
-    # TÜMÜNÜ SEÇ BUTONU
     if f"select_all_{edit_day}" not in st.session_state:
         st.session_state[f"select_all_{edit_day}"] = False
 
@@ -1934,7 +1934,6 @@ if results is not None:
             gosterilecek_isgucu = [round(v, 1) for v in results["gunluk_saatlik_isgucu"][secilen_isgucu_gorunumu]]
             grafik_baslik = f"{secilen_isgucu_gorunumu} Günü Saatlik İşgücü İhtiyacı (Kişi / Saat)"
 
-        # Peak: O hafta boyunca herhangi bir günde ve saatte ortaya çıkmış mutlak en yüksek anlık işgücü ihtiyacı
         haftalik_tum_peakler = [
             max(g_vals) for g_vals in results["gunluk_saatlik_isgucu"].values() if g_vals
         ]
