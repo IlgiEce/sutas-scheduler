@@ -33,8 +33,10 @@ st.set_page_config(
 # ==============================================================================
 # KULLANICI & YÖNETİCİ GİRİŞ SİSTEMİ
 # ==============================================================================
+# ==============================================================================
+# KULLANICI DOĞRULAMA VE OTURUM SÜRESİ LOGLAMA SİSTEMİ
+# ==============================================================================
 ADMIN_PIN = "2026"
-
 
 def isim_gecerli_mi(isim: str) -> bool:
     isim = isim.strip()
@@ -43,32 +45,75 @@ def isim_gecerli_mi(isim: str) -> bool:
     kelimeler = isim.split()
     if len(kelimeler) < 2:
         return False
-    if any(len(k) < 2 for k in kelimeler):
+    # İlk kelime en az 3 harf, diğer kelimeler en az 2 harf olmalı
+    if len(kelimeler[0]) < 3 or any(len(k) < 2 for k in kelimeler[1:]):
         return False
     return True
 
 
-def sheet_log_kaydet(kullanici_etiketi: str):
+def sheet_log_giris(kullanici_etiketi: str) -> str:
+    """Kullanıcı sisteme ilk girdiğinde yeni log satırı açar ve session_id döner."""
     turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
     log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
+    session_id = f"{kullanici_etiketi}_{int(turkiye_saati.timestamp())}"
     try:
         from streamlit_gsheets import GSheetsConnection
-
         conn = st.connection("gsheets", type=GSheetsConnection)
         try:
             df_log = conn.read(ttl=0)
             if df_log is None or df_log.empty:
-                df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+                df_log = pd.DataFrame(columns=["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"])
         except Exception:
-            df_log = pd.DataFrame(columns=["Zaman", "Kullanıcı"])
+            df_log = pd.DataFrame(columns=["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"])
+
+        # Eksik sütun kontrolü
+        for col in ["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"]:
+            if col not in df_log.columns:
+                df_log[col] = ""
 
         df_log = df_log.dropna(how="all")
-        new_row = pd.DataFrame([{"Zaman": log_time, "Kullanıcı": kullanici_etiketi}])
+        new_row = pd.DataFrame([{
+            "Session_ID": session_id,
+            "Giriş Zamanı": log_time,
+            "Kullanıcı": kullanici_etiketi,
+            "Son Görülme": log_time,
+            "Oturum Süresi": "0 dk 0 sn"
+        }])
         df_updated = pd.concat([df_log, new_row], ignore_index=True)
         conn.update(data=df_updated)
     except Exception:
         pass
+    return session_id
 
+
+def sheet_log_guncelle():
+    """Kullanıcı sayfada kaldığı ve işlem yaptığı sürece oturum süresini günceller."""
+    if "session_id" not in st.session_state or not st.session_state["session_id"]:
+        return
+    if "login_datetime" not in st.session_state:
+        return
+
+    now = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    login_dt = st.session_state["login_datetime"]
+    diff_sec = int((now - login_dt).total_seconds())
+
+    mins = diff_sec // 60
+    secs = diff_sec % 60
+    sure_str = f"{mins} dk {secs} sn" if mins > 0 else f"{secs} sn"
+    last_seen_str = now.strftime("%d-%m-%Y %H:%M:%S")
+
+    try:
+        from streamlit_gsheets import GSheetsConnection
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        df_log = conn.read(ttl=0)
+        if df_log is not None and not df_log.empty and "Session_ID" in df_log.columns:
+            mask = df_log["Session_ID"] == st.session_state["session_id"]
+            if mask.any():
+                df_log.loc[mask, "Son Görülme"] = last_seen_str
+                df_log.loc[mask, "Oturum Süresi"] = sure_str
+                conn.update(data=df_log)
+    except Exception:
+        pass
 
 if "auth_user" not in st.session_state:
     st.session_state["auth_user"] = None
@@ -76,6 +121,10 @@ if "is_admin" not in st.session_state:
     st.session_state["is_admin"] = False
 if "admin_login_mode" not in st.session_state:
     st.session_state["admin_login_mode"] = False
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = None
+if "login_datetime" not in st.session_state:
+    st.session_state["login_datetime"] = None
 
 if st.session_state["auth_user"] is None:
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
@@ -92,11 +141,12 @@ if st.session_state["auth_user"] is None:
                 if submit_btn:
                     temiz_isim = user_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (Sembol veya rakam kullanılamaz).")
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk isim min 3 harf, soyisim min 2 harf olmalı, rakam/sembol içeremez).")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
-                        sheet_log_kaydet(temiz_isim.title())
+                        st.session_state["login_datetime"] = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+                        st.session_state["session_id"] = sheet_log_giris(temiz_isim.title())
                         st.rerun()
 
             st.markdown("---")
@@ -114,14 +164,15 @@ if st.session_state["auth_user"] is None:
                 if admin_submit:
                     temiz_isim = admin_name.strip()
                     if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz.")
+                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk isim min 3, soyisim min 2 harf).")
                     elif pin_input != ADMIN_PIN:
                         st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
                     else:
                         st.session_state["auth_user"] = f"{temiz_isim.title()} (Yönetici)"
                         st.session_state["is_admin"] = True
                         st.session_state["admin_login_mode"] = False
-                        sheet_log_kaydet(f"{temiz_isim.title()} (Yönetici)")
+                        st.session_state["login_datetime"] = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+                        st.session_state["session_id"] = sheet_log_giris(f"{temiz_isim.title()} (Yönetici)")
                         st.rerun()
 
             if st.button("⬅️ Kullanıcı Girişine Dön", use_container_width=True):
@@ -130,6 +181,8 @@ if st.session_state["auth_user"] is None:
 
     st.stop()
 
+# Kullanıcı giriş yaptıktan sonra her rerun'da logdaki aktiflik süresi güncellenir
+sheet_log_guncelle()
 # ==============================================================================
 # MODEL VE PARAMETRE TANIMLARI
 # ==============================================================================
