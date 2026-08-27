@@ -573,8 +573,6 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
-    # 1. Önceliklendirme: En çok tüketilen Tam Yağlı ve Yarım Yağlı sütler 08:00'e yetiştirilecek ilk 2-3 tanka verilir.
-    # 2. Sıralı Tank CIP ve Dolum: Tanklar boşaldığı an yıkanır ve P6 tek hat üzerinden sıralı doldurur.
     sorted_tanks = sorted(
         tank_list,
         key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14)),
@@ -586,7 +584,6 @@ def gunluk_tank_hazirligi_v80(
     )
     current_p6_available = max(p6_state["musaitlik"], gun_baslangic - datetime.timedelta(hours=14))
 
-    # İlk 2 tank (en kritik Tam ve Yarım Yağlı) sabah 08:00'e tam hazır olacak şekilde geriye doğru hizalanır
     total_prep_hours_first_2 = (sorted_tanks[0][1] + sorted_tanks[1][1]) / p6_debi + kultur_suresi
     earliest_night_start = gun_baslangic - datetime.timedelta(hours=total_prep_hours_first_2)
 
@@ -594,12 +591,10 @@ def gunluk_tank_hazirligi_v80(
         st_req = assigned_types[idx % len(assigned_types)]
         t_bosaldi = tank_states.get(tk_name, {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14))
         
-        # Tank CIP boşaldığı an başlar (sıralı devre kısıtı ile)
         t_cip_start = max(t_bosaldi, current_tank_cip_available)
         t_cip_done = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
         current_tank_cip_available = t_cip_done
 
-        # P6 Dolumu: İlk 2 tank 08:00'e yetişecek akıllı takvimle, kalanlar sırasıyla sabah ilk saatlerde hazır olur
         dolum_h = cap / p6_debi
         t_p6_earliest = max(t_cip_done, current_p6_available)
 
@@ -620,7 +615,7 @@ def gunluk_tank_hazirligi_v80(
 
         actual_ready = t_p6_end + datetime.timedelta(hours=kultur_suresi)
         if idx < 2 and actual_ready < gun_baslangic:
-            actual_ready = gun_baslangic  # 08:00 vardiya başlangıcına hazır kilitlenir
+            actual_ready = gun_baslangic
 
         tanks[tk_name] = {
             "kapasite": cap,
@@ -894,7 +889,6 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
-            # Makine İçi CIP: Sadece 8.5 saat kesintisiz dolum tamamlandığında tetiklenir
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma and p_start > gun_baslangic:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -923,7 +917,6 @@ def run_scheduler_pipeline(
                 refill_t_name, refill_info = sorted_by_empty[0]
                 t_bosaldi = refill_info["bosalma_saati"]
 
-                # Sıralı Tank Yıkama: Boşaldığı an hemen başlar
                 t_cip_start = max(t_bosaldi, tank_cip_musaitlik)
                 t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
                 tank_cip_musaitlik = t_cip_end
@@ -932,7 +925,6 @@ def run_scheduler_pipeline(
                 t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
                 toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req, MAKINE_LISTESI)
 
-                # Parçalı Dolum Eşiği: Yalnızca mesai bitimine 5 saatten az kaldığında (23:00 sonrası) devreye girer.
                 tam_dolum_suresi = TANK_KAPASITELERI[refill_t_name] / p6_debi
                 t_hazir_tahmini = t_p6_start_earliest + datetime.timedelta(hours=tam_dolum_suresi + kultur_suresi)
                 kalan_mesai_saati = max(0.0, (cutoff_0400 - max(p_start, t_hazir_tahmini)).total_seconds() / 3600.0)
@@ -947,7 +939,6 @@ def run_scheduler_pipeline(
                         max(0.0, max_uretilebilir),
                     )
                 else:
-                    # Gün içinde tank tam kapasite doldurulur
                     fill_amount = min(
                         TANK_KAPASITELERI[refill_t_name],
                         round(rem_demand_st, 2)
@@ -1523,7 +1514,6 @@ def varsayilana_sifirla():
     for key, val in DEFAULT_PARAMS.items():
         st.session_state[key] = val
     st.session_state["custom_factory_data"] = {k: list(v) for k, v in DEFAULT_FACTORY_DATA.items()}
-    st.session_state["results"] = None
     st.session_state["selected_tab"] = "📊 Yönetici Özeti"
     st.rerun()
 
@@ -1583,65 +1573,31 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 2. SENARYO & PARAMETRE AYARLARI
-    if st.session_state["is_admin"]:
-        st.header("🎛️ 2. Senaryo & Parametre Ayarları ✏️")
-        st.button("🔄 Parametreleri Varsayılana Sıfırla", on_click=varsayilana_sifirla, use_container_width=True)
+    # 2. SENARYO & PARAMETRE AYARLARI (TÜM DEĞİŞİKLİKLER ANINDA MOTORU TETİKLER)
+    st.header("🎛️ 2. Dinamik Fabrika Parametreleri ✏️")
 
-        with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
-            sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, value=float(st.session_state.get("p6_debi", DEFAULT_PARAMS["p6_debi"])), step=0.5, key="p6_debi")
-            sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=1.0, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
-            sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", DEFAULT_PARAMS["max_kultur_bekleme"])), step=0.5, key="max_kultur_bekleme")
-            sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
-            sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
+    with st.expander("⚡ Pastörizatör (P6) & Mayalama", expanded=False):
+        sim_p6_debi = st.slider("P6 Debi Hızı (Ton / Saat)", min_value=6.0, max_value=18.0, value=float(st.session_state.get("p6_debi", DEFAULT_PARAMS["p6_debi"])), step=0.5, key="p6_debi")
+        sim_kultur_suresi = st.slider("Mayalama (Kültür) Süresi (Saat)", min_value=1.0, max_value=3.0, value=float(st.session_state.get("kultur_suresi", DEFAULT_PARAMS["kultur_suresi"])), step=0.25, key="kultur_suresi")
+        sim_max_kultur_bekleme = st.slider("Maks. Mayalı Bekleme Limiti (Saat)", min_value=3.0, max_value=10.0, value=float(st.session_state.get("max_kultur_bekleme", DEFAULT_PARAMS["max_kultur_bekleme"])), step=0.5, key="max_kultur_bekleme")
+        sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
+        sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
 
-        with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
-            sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, value=float(st.session_state.get("mesai_saati", DEFAULT_PARAMS["mesai_saati"])), step=1.0, key="mesai_saati")
-            sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("tank_cip_suresi", DEFAULT_PARAMS["tank_cip_suresi"])), step=0.25, key="tank_cip_suresi")
-            sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, value=float(st.session_state.get("makine_max_calisma", DEFAULT_PARAMS["makine_max_calisma"])), step=0.5, key="makine_max_calisma")
+    with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
+        sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, value=float(st.session_state.get("mesai_saati", DEFAULT_PARAMS["mesai_saati"])), step=1.0, key="mesai_saati")
+        sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("tank_cip_suresi", DEFAULT_PARAMS["tank_cip_suresi"])), step=0.25, key="tank_cip_suresi")
+        sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, value=float(st.session_state.get("makine_max_calisma", DEFAULT_PARAMS["makine_max_calisma"])), step=0.5, key="makine_max_calisma")
 
-        with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
-            sim_opt_mode = st.radio(
-                "Algoritma Hedefi:",
-                ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
-                help="• Sezgisel JIT: Sütü tam vaktinde mayalayarak tank beklemesini sıfırlar.\n• Min-Geçiş: Aynı reçete ve kalıpları ardışık dizerek CIP duruşlarını minimize eder.\n• Min-Makespan: En büyük siparişleri önceleyerek vardiya bitiş süresini erkene çeker."
-            )
-    else:
-        st.header("🎛️ 2. Aktif Fabrika Parametreleri 🔒")
-        sim_p6_debi = DEFAULT_PARAMS["p6_debi"]
-        sim_kultur_suresi = DEFAULT_PARAMS["kultur_suresi"]
-        sim_max_kultur_bekleme = DEFAULT_PARAMS["max_kultur_bekleme"]
-        sim_p6_cip_limit = DEFAULT_PARAMS["p6_cip_limit"]
-        sim_p6_cip_suresi = DEFAULT_PARAMS["p6_cip_suresi"]
-        sim_mesai_saati = DEFAULT_PARAMS["mesai_saati"]
-        sim_tank_cip_suresi = DEFAULT_PARAMS["tank_cip_suresi"]
-        sim_makine_max_calisma = DEFAULT_PARAMS["makine_max_calisma"]
-        sim_opt_mode = "Sezgisel JIT (Mevcut)"
-
-        with st.expander("⚡ Pastörizatör (P6) & Mayalama (Sabit)", expanded=False):
-            st.markdown(f"""
-            * **P6 Debi Hızı:** `{sim_p6_debi} Ton/Saat`
-            * **Mayalama (Kültür) Süresi:** `{sim_kultur_suresi} Saat`
-            * **Maks. Mayalı Bekleme Limiti:** `{sim_max_kultur_bekleme} Saat`
-            * **P6 CIP Yıkama Limiti:** `{int(sim_p6_cip_limit)} Ton`
-            * **P6 CIP Yıkama Süresi:** `{sim_p6_cip_suresi} Saat`
-            """)
-
-        with st.expander("⏱️ Vardiya & Hijyen Süreleri (Sabit)", expanded=False):
-            st.markdown(f"""
-            * **Günlük Mesai Penceresi:** `{int(sim_mesai_saati)} Saat (08:00 - 04:00)`
-            * **Tank CIP Süresi:** `{sim_tank_cip_suresi} Saat`
-            * **Maks. Ardışık Makine Çalışması:** `{sim_makine_max_calisma} Saat`
-            """)
-
-        with st.expander("🤖 Çizelgeleme Algoritması (Sabit)", expanded=False):
-            st.markdown(f"""
-            * **Optimizasyon Yöntemi:** `{sim_opt_mode}`
-            """)
+    with st.expander("🤖 Çizelgeleme Algoritması (Optimizasyon)", expanded=False):
+        sim_opt_mode = st.radio(
+            "Algoritma Hedefi:",
+            ["Sezgisel JIT (Mevcut)", "Min-Geçiş (CIP Optimizasyonu)", "Min-Makespan (Kapasite Öncelikli)"],
+            help="• Sezgisel JIT: Sütü tam vaktinde mayalayarak tank beklemesini sıfırlar.\n• Min-Geçiş: Aynı reçete ve kalıpları ardışık dizerek CIP duruşlarını minimize eder.\n• Min-Makespan: En büyük siparişleri önceleyerek vardiya bitiş süresini erkene çeker."
+        )
 
     st.markdown("---")
 
-    # HERKESE AÇIK: Dinamik Arıza Simülasyonu
+    # Dinamik Arıza Simülasyonu
     st.header("⚙️ Dinamik Simülasyon & Arıza")
     with st.expander("⚠️ Dinamik Arıza Simülasyonu", expanded=True):
         sim_ariza_aktif = st.toggle("🚨 Arıza Simülasyonunu Devreye Al", value=False)
@@ -1665,28 +1621,18 @@ with st.sidebar:
             sim_ariza_gun, sim_ariza_makine, sim_ariza_saat_str, sim_ariza_sure = "Pazartesi", "160 çap", "14:00", 60
 
     st.markdown("---")
-    # Sabit Tesis Kısıtları
     st.header("🔒 Sabit Tesis & Fiziksel Kısıtlar")
     with st.expander("🛢️ Mayalama Tank Parkı (113 Ton)", expanded=False):
         st.markdown("""
-        * **T43:** 38.0 Ton
-        * **T40:** 25.0 Ton
-        * **T41:** 25.0 Ton
-        * **T42:** 25.0 Ton
-        * **Toplam Kapasite:** 113.0 Ton
-        * **Kural:** Tank CIP ve P6 dolumu tek hat üzerinden sıralı yürütülür. Boşalan tank anında yıkanır. İlk 2-3 tank 08:00'e yetiştirilir, diğerleri sıralı devreye girer.
+        * **T43:** 38.0 Ton | **T40:** 25.0 Ton | **T41:** 25.0 Ton | **T42:** 25.0 Ton (Toplam: 113 Ton)
+        * **Kural:** Boşalan tank hemen sıralı CIP'ye girer. İlk 2-3 tank 08:00'e yetiştirilir.
         """)
 
     with st.expander("🧼 Makine CIP Yıkama Hatları", expanded=False):
         st.markdown("""
-        * **HAT_1 (Kase Grubu):**
-          * **160 çap:** 60 dk yıkama
-          * **132 çap:** 60 dk yıkama
-          * **Grunwald:** 110 dk yıkama
-        * **HAT_2 (Kova Grubu):**
-          * **Küçük Kova:** 60 dk yıkama
-          * **Büyük Kova:** 60 dk yıkama
-        * **Kural:** Vardiya içi yalnızca 8.5 saatlik fiziksel sınır dolduğunda hat bazlı sıralı CIP uygulanır. Reçete değişimlerinde yıkanmaz.
+        * **HAT_1:** 160 çap (60 dk) | 132 çap (60 dk) | Grunwald (110 dk)
+        * **HAT_2:** Küçük Kova (60 dk) | Büyük Kova (60 dk)
+        * **Kural:** Yalnızca 8.5 saat kesintisiz dolum sonrasında devreye girer. Süt değişiminde yıkanmaz.
         """)
 
     with st.expander("⚡ Makine Hız Matrisi (Nominal)", expanded=False):
@@ -1700,12 +1646,8 @@ with st.sidebar:
 
     with st.expander("👥 Hat & Operatör İşgücü Katsayıları", expanded=False):
         st.markdown("""
-        * **160 çap:** 4.0 Operatör/Saat
-        * **132 çap:** 5.0 Operatör/Saat
-        * **Grunwald:** 4.0 Operatör/Saat
-        * **Küçük Kova:** 5.0 Operatör/Saat
-        * **Büyük Kova:** 6.0 Operatör/Saat
-        * **Eşzamanlı Çalışma:** Maks. 5 Hat (Gündüz & Gece)
+        * **160 çap:** 4.0 Kişi/Saat | **132 çap:** 5.0 Kişi/Saat | **Grunwald:** 4.0 Kişi/Saat
+        * **Küçük Kova:** 5.0 Kişi/Saat | **Büyük Kova:** 6.0 Kişi/Saat
         """)
 
     st.markdown("---")
@@ -1768,43 +1710,38 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
 
         if confirm_btn:
             st.session_state["custom_factory_data"][edit_day] = updated_day_list
-            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi! Aşağıdaki butona basarak yeni planı optimize edebilirsiniz.")
+            st.success(f"✅ {edit_day} günü siparişleri başarıyla güncellendi! Plan otomatik olarak yeniden hesaplanıyor.")
             st.rerun()
 
     st.markdown("---")
 
 # ==============================================================================
-# OPTİMİZASYON VE HESAPLAMA MOTORU
+# REAKTİF OPTİMİZASYON VE HESAPLAMA MOTORU (ANINDA GÜNCELLENİR)
 # ==============================================================================
-if "results" not in st.session_state:
-    st.session_state["results"] = None
-
 if active_excel_source is not None:
-    if st.button("🚀 Senaryoyu Hesapla ve Optimize Et", type="primary", key="btn_run", use_container_width=True):
-        with st.spinner("Matematiksel kısıtlar, sıralı dolumlar ve güncel siparişler hesaplanıyor..."):
-            st.session_state["results"] = run_scheduler_pipeline(
-                excel_source=active_excel_source,
-                p6_debi=sim_p6_debi,
-                kultur_suresi=sim_kultur_suresi,
-                tank_cip_suresi=sim_tank_cip_suresi,
-                max_kultur_bekleme=sim_max_kultur_bekleme,
-                makine_max_calisma=sim_makine_max_calisma,
-                p6_cip_limit=sim_p6_cip_limit,
-                p6_cip_suresi=sim_p6_cip_suresi,
-                gunluk_mesai_saati=sim_mesai_saati,
-                opt_mode=sim_opt_mode,
-                ariza_aktif=sim_ariza_aktif,
-                ariza_gun=sim_ariza_gun,
-                ariza_makine=sim_ariza_makine,
-                ariza_saat_str=sim_ariza_saat_str,
-                ariza_sure=sim_ariza_sure,
-            )
-        st.success("✅ Senaryo optimizasyonu başarıyla tamamlandı!")
+    results = run_scheduler_pipeline(
+        excel_source=active_excel_source,
+        p6_debi=sim_p6_debi,
+        kultur_suresi=sim_kultur_suresi,
+        tank_cip_suresi=sim_tank_cip_suresi,
+        max_kultur_bekleme=sim_max_kultur_bekleme,
+        makine_max_calisma=sim_makine_max_calisma,
+        p6_cip_limit=sim_p6_cip_limit,
+        p6_cip_suresi=sim_p6_cip_suresi,
+        gunluk_mesai_saati=sim_mesai_saati,
+        opt_mode=sim_opt_mode,
+        ariza_aktif=sim_ariza_aktif,
+        ariza_gun=sim_ariza_gun,
+        ariza_makine=sim_ariza_makine,
+        ariza_saat_str=sim_ariza_saat_str,
+        ariza_sure=sim_ariza_sure,
+    )
+    st.session_state["results"] = results
 else:
-    st.warning("👈 Başlamak için sol menüden veri seçin ve hesaplamayı başlatın.")
+    results = None
+    st.warning("👈 Başlamak için sol menüden veri seçin.")
 
-if st.session_state["results"] is not None:
-    results = st.session_state["results"]
+if results is not None:
     toplam_eksik_ton = results["toplam_eksik_genel"]
 
     col1, col2, col3, col4 = st.columns(4)
@@ -1821,17 +1758,7 @@ if st.session_state["results"] is not None:
     )
     st.markdown("---")
 
-    tab_options = ["📊 Yönetici Özeti"]
-
-    if st.session_state["is_admin"]:
-        tab_options.append("⚖️ Senaryo Kıyaslama (What-If)")
-
-    tab_options.append("🔍 Denetim Logu")
-
-    if st.session_state["is_admin"]:
-        tab_options.extend(["📈 Darboğaz & Kapasite", "👥 İşgücü Analizi"])
-
-    tab_options.extend(["📊 Gantt Şeması", "📅 Günlük Çizelgeler"])
+    tab_options = ["📊 Yönetici Özeti", "⚖️ Senaryo Kıyaslama (What-If)", "🔍 Denetim Logu", "📈 Darboğaz & Kapasite", "👥 İşgücü Analizi", "📊 Gantt Şeması", "📅 Günlük Çizelgeler"]
 
     current_tab = st.radio("Görünüm Seçin:", tab_options, horizontal=True, key="selected_tab", label_visibility="collapsed")
 
@@ -1844,7 +1771,7 @@ if st.session_state["results"] is not None:
         st.dataframe(results["df_kpi"], use_container_width=True)
         st.pyplot(results["fig_kpi"])
 
-    elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)" and st.session_state["is_admin"]:
+    elif current_tab == "⚖️ Senaryo Kıyaslama (What-If)":
         st.subheader("⚖️ Stratejik Senaryo Kıyaslama ve Kapasite Analizi")
         st.markdown("Farklı operasyonel stratejilerin ve kapasite yatırımlarının tesis çıktısına etkisini yan yana kıyaslayın:")
         with st.spinner("Karşılaştırma senaryoları simüle ediliyor..."):
@@ -1872,12 +1799,12 @@ if st.session_state["results"] is not None:
             )
 
         comp_data = [
-            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['p6_debi']:.1f} T/Sa"},
-            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
-            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun (Senin Kısıtların)": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 Önerisi (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür Önerisi (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
-            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
-            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun (Senin Kısıtların)": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 Önerisi (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür Önerisi (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
+            {"Performans Göstergesi": "P6 Debi Hızı (Ton/Sa)", "1. Aktif Simülasyonun": f"{res_curr['p6_debi']:.1f} T/Sa", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['p6_debi']:.1f} T/Sa", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['p6_debi']:.1f} T/Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['p6_debi']:.1f} T/Sa"},
+            {"Performans Göstergesi": "Mayalama Süresi (Saat)", "1. Aktif Simülasyonun": f"{res_curr['kultur_suresi']:.2f} Sa", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['kultur_suresi']:.2f} Sa", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['kultur_suresi']:.2f} Sa", "4. Tam Entegre İkili İyileştirme": f"{res_both['kultur_suresi']:.2f} Sa"},
+            {"Performans Göstergesi": "Haftalık Gerçekleşen Tonaj", "1. Aktif Simülasyonun": f"{res_curr['toplam_gerceklesen_genel']:.1f} Ton", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['toplam_gerceklesen_genel']:.1f} Ton", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['toplam_gerceklesen_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_gerceklesen_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "Karşılanamayan / Eksik Tonaj", "1. Aktif Simülasyonun": f"{res_curr['toplam_eksik_genel']:.1f} Ton", "2. Maksimum P6 (18 T/Sa)": f"{res_max_p6['toplam_eksik_genel']:.1f} Ton", "3. Optimum Kültür (1.0 Sa)": f"{res_opt_cult['toplam_eksik_genel']:.1f} Ton", "4. Tam Entegre İkili İyileştirme": f"{res_both['toplam_eksik_genel']:.1f} Ton"},
+            {"Performans Göstergesi": "04:00 Hedef Uyum Oranı (% OTIF)", "1. Aktif Simülasyonun": f"%{res_curr['genel_uyum']:.1f}", "2. Maksimum P6 (18 T/Sa)": f"%{res_max_p6['genel_uyum']:.1f}", "3. Optimum Kültür (1.0 Sa)": f"%{res_opt_cult['genel_uyum']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_uyum']:.1f}"},
+            {"Performans Göstergesi": "P6 Efektif Hat Doygunluğu (%)", "1. Aktif Simülasyonun": f"%{res_curr['genel_p6_oee']:.1f}", "2. Maksimum P6 (18 T/Sa)": f"%{res_max_p6['genel_p6_oee']:.1f}", "3. Optimum Kültür (1.0 Sa)": f"%{res_opt_cult['genel_p6_oee']:.1f}", "4. Tam Entegre İkili İyileştirme": f"%{res_both['genel_p6_oee']:.1f}"},
         ]
         st.dataframe(pd.DataFrame(comp_data), use_container_width=True)
 
@@ -1887,7 +1814,7 @@ if st.session_state["results"] is not None:
         st.info(
             f"💡 **Yönetici & Kapasite Karar Notu:**\n"
             f"* **P6 Kapasite Artışı (18 T/Sa):** Aktif senaryona kıyasla haftalık **{kurtarilan_p6_ton:.1f} Ton** ek üretim sağlar.\n"
-            f"* **Optimum Kültür Süresi (1.0 Sa / 60 dk):** Mayalama süresini 1 saate çekerek tank devir hızını artırır, gece hazırlığını rahatlatır ve hatların sabah 08:00'de kesintisiz doluma başlamasını garantiler.\n"
+            f"* **Optimum Kültür Süresi (1.0 Sa / 60 dk):** Mayalama süresini 1 saate çekerek tank devir hızını artırır ve sabah kesintisiz dolumu garantiler.\n"
             f"* **Tam Entegre İkili İyileştirme:** Her iki iyileştirme birlikte devreye alındığında haftalık **{kurtarilan_both_ton:.1f} Ton** eksik sipariş kurtarılır."
         )
 
@@ -1895,12 +1822,12 @@ if st.session_state["results"] is not None:
         st.subheader("P6 ve Tank Geçişleri Denetim Günlüğü")
         st.dataframe(results["df_audit"], use_container_width=True)
 
-    elif current_tab == "📈 Darboğaz & Kapasite" and st.session_state["is_admin"]:
+    elif current_tab == "📈 Darboğaz & Kapasite":
         st.subheader("Sistem Darboğazları & Kapasite Doluluk Oranları")
         st.pyplot(results["fig_db1"])
         st.pyplot(results["fig_hm"])
 
-    elif current_tab == "👥 İşgücü Analizi" and st.session_state["is_admin"]:
+    elif current_tab == "👥 İşgücü Analizi":
         st.subheader("İşgücü İhtiyacı Seviyelendirme Analizi")
         isgucu_secenekleri = ["📊 Haftalık Genel Ortalama"] + list(results["gunluk_saatlik_isgucu"].keys())
         secilen_isgucu_gorunumu = st.selectbox("İşgücü Görünümü Seçin:", isgucu_secenekleri)
@@ -2019,7 +1946,7 @@ if st.session_state["results"] is not None:
 
             st.plotly_chart(fig_plotly, use_container_width=True)
         else:
-            st.info("Gantt şeması oluşturmak için lütfen sol menüden simülasyonu çalıştırın.")
+            st.info("Gantt şeması oluşturmak için lütfen sol menüden veri yükleyin.")
 
     elif current_tab == "📅 Günlük Çizelgeler":
         st.subheader("Gün Bazlı Makine Çizelgeleri")
