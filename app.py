@@ -401,8 +401,6 @@ def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
     elif makine_adi == "Büyük Kova":
         if "2000" in str(gramaj_adi):
             return 3.192
-        elif "5000" in str(gramaj_adi):
-            return 5.415
         return 5.415
     elif makine_adi == "160 çap":
         if "750" in str(gramaj_adi):
@@ -649,7 +647,6 @@ def gunluk_tank_hazirligi_v80(
     return tanks
 
 
-# Gündüz 4-5 Ekip, Gece 3-4 Ekip Ağırlıklı Ortalaması
 def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20.0):
     gunduz_bas = gun_baslangic
     gunduz_bit = gun_baslangic + datetime.timedelta(hours=min(10.0, mesai_saati))
@@ -670,12 +667,8 @@ def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20
         gece_ornekleri.append(c)
         t += datetime.timedelta(minutes=30)
 
-    # Gündüz 4-5 bant aralığı, gece 3-4 bant aralığı seviyelendirmesi
     avg_g = round(sum(gunduz_ornekleri) / max(1, len(gunduz_ornekleri)), 1) if gunduz_ornekleri else 4.0
     avg_n = round(sum(gece_ornekleri) / max(1, len(gece_ornekleri)), 1) if gece_ornekleri else 3.0
-
-    avg_g = max(4.0, min(5.0, avg_g))
-    avg_n = max(3.0, min(4.0, avg_n))
 
     return avg_g, avg_n
 
@@ -853,6 +846,7 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
+            # İhtiyaç halinde 5 makine aynı anda açılabilir
             active_count = sum(
                 1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
             )
@@ -866,7 +860,6 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
-            # Tank Hazır Süt Listesi (Aynı tank birden çok makineyi besleyebilir)
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -901,7 +894,6 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
-            # Makine İçi CIP: 8.5 saat kesintisiz dolum tamamlandığında tetiklenir
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma and p_start > gun_baslangic:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -914,7 +906,6 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
-            # Tank Eşleştirme (Aynı tanktan birden fazla makine eşzamanlı çekebilir)
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
                 if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -2002,7 +1993,7 @@ if results is not None:
 st.markdown("---")
 st.markdown(
     f"""
-    <div style="text-align: center; color: #595959; font-size: 13px; padding: 15px 0;">
+    <div style="text-align: center; color: #595959; font-size: 13px; padding-bottom: 5px;">
         <b>Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
         Developer: <b>{DEVELOPER_NAME}</b><br>
         <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
