@@ -575,7 +575,7 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
-    # Gece sıralı P6 dolumu: Kültürlü 6 saat, Toplam 10 saat kuralına tam uyacak şekilde sıralanır
+    # Gece P6 dolumu: Sabah tüm makinelerin süt bulabilmesi için 3-4 tank sıralı hazırlanır
     sorted_tanks = sorted(
         tank_list,
         key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14)),
@@ -656,19 +656,21 @@ def vardiya_ekip_ortalamasi_hesapla(machines_dict, gun_baslangic, mesai_saati=20
     gunduz_ornekleri = []
     t = gunduz_bas
     while t < gunduz_bit:
-        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"]))
-        gunduz_ornekleri.append(c)
+        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] and item[2] == "URETIM" for item in machines_dict[m]["calisma_araliklari"]))
+        if c > 0:
+            gunduz_ornekleri.append(c)
         t += datetime.timedelta(minutes=30)
 
     gece_ornekleri = []
     t = gece_bas
     while t < gece_bit:
-        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] for item in machines_dict[m]["calisma_araliklari"]))
-        gece_ornekleri.append(c)
+        c = sum(1 for m in MAKINE_LISTESI if any(item[0] <= t < item[1] and item[2] == "URETIM" for item in machines_dict[m]["calisma_araliklari"]))
+        if c > 0:
+            gece_ornekleri.append(c)
         t += datetime.timedelta(minutes=30)
 
     avg_g = round(sum(gunduz_ornekleri) / max(1, len(gunduz_ornekleri)), 1) if gunduz_ornekleri else 4.0
-    avg_n = round(sum(gece_ornekleri) / max(1, len(gece_ornekleri)), 1) if gece_ornekleri else 3.0
+    avg_n = round(sum(gece_ornekleri) / max(1, len(gece_ornekleri)), 1) if gece_ornekleri else 3.5
 
     return avg_g, avg_n
 
@@ -683,6 +685,7 @@ def run_scheduler_pipeline(
     p6_cip_limit=100.0,
     p6_cip_suresi=1.0,
     gunluk_mesai_saati=20.0,
+    maks_ekip_sayisi=5,
     opt_mode="Sezgisel JIT (Mevcut)",
     ariza_aktif=False,
     ariza_gun="Pazartesi",
@@ -846,13 +849,12 @@ def run_scheduler_pipeline(
             m_info = machines[chosen_m_name]
             current_time = m_info["musait_zamani"]
 
-            # İhtiyaç halinde 5 makine aynı anda açılabilir
+            # Dinamik Ekip (Eşzamanlı Hat) Kontrolü
             active_count = sum(
-                1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] for item in machines[m]["calisma_araliklari"])
+                1 for m in MAKINE_LISTESI if any(item[0] <= current_time < item[1] and item[2] == "URETIM" for item in machines[m]["calisma_araliklari"])
             )
-            max_allowed = 5
 
-            if active_count >= max_allowed:
+            if active_count >= maks_ekip_sayisi:
                 future_ends = [
                     item[1] for m in MAKINE_LISTESI for item in machines[m]["calisma_araliklari"] if item[1] > current_time
                 ]
@@ -860,6 +862,7 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
+            # Tank Hazır Süt Listesi (Aynı tank birden çok makineyi besleyebilir)
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -883,7 +886,7 @@ def run_scheduler_pipeline(
                 ]
 
             if not matching_orders:
-                m_info["musait_zamani"] += datetime.timedelta(minutes=15)
+                m_info["musait_zamani"] += datetime.timedelta(minutes=10)
                 continue
 
             pending_o = matching_orders[0]
@@ -894,6 +897,7 @@ def run_scheduler_pipeline(
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
+            # Makine İçi CIP: 8.5 saat kesintisiz dolum tamamlandığında tetiklenir
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma and p_start > gun_baslangic:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -906,6 +910,7 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
+            # Tank Eşleştirme (Aynı tanktan birden fazla makine eşzamanlı çekebilir)
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
                 if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -1504,6 +1509,7 @@ DEFAULT_PARAMS = {
     "p6_cip_limit": 100.0,
     "p6_cip_suresi": 1.0,
     "mesai_saati": 20.0,
+    "maks_ekip": 5,
     "tank_cip_suresi": 1.0,
     "makine_max_calisma": 8.5,
 }
@@ -1592,8 +1598,9 @@ with st.sidebar:
         sim_p6_cip_limit = st.number_input("P6 CIP Yıkama Limiti (Ton)", min_value=50.0, max_value=200.0, value=float(st.session_state.get("p6_cip_limit", DEFAULT_PARAMS["p6_cip_limit"])), step=10.0, key="p6_cip_limit")
         sim_p6_cip_suresi = st.slider("P6 CIP Yıkama Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("p6_cip_suresi", DEFAULT_PARAMS["p6_cip_suresi"])), step=0.25, key="p6_cip_suresi")
 
-    with st.expander("⏱️ Vardiya & Hijyen Süreleri", expanded=False):
+    with st.expander("⏱️ Vardiya & Eşzamanlı Hat Ayarları", expanded=False):
         sim_mesai_saati = st.slider("Günlük Mesai Penceresi (Saat)", min_value=16.0, max_value=24.0, value=float(st.session_state.get("mesai_saati", DEFAULT_PARAMS["mesai_saati"])), step=1.0, key="mesai_saati")
+        sim_maks_ekip = st.slider("Maks. Eşzamanlı Çalışacak Hat (Ekip) Sayısı", min_value=1, max_value=5, value=int(st.session_state.get("maks_ekip", 5)), step=1, key="maks_ekip")
         sim_tank_cip_suresi = st.slider("Tank CIP Süresi (Saat)", min_value=0.5, max_value=2.0, value=float(st.session_state.get("tank_cip_suresi", DEFAULT_PARAMS["tank_cip_suresi"])), step=0.25, key="tank_cip_suresi")
         sim_makine_max_calisma = st.slider("Maks. Ardışık Makine Çalışması (Saat)", min_value=4.0, max_value=12.0, value=float(st.session_state.get("makine_max_calisma", DEFAULT_PARAMS["makine_max_calisma"])), step=0.5, key="makine_max_calisma")
 
@@ -1740,6 +1747,7 @@ if active_excel_source is not None:
         p6_cip_limit=sim_p6_cip_limit,
         p6_cip_suresi=sim_p6_cip_suresi,
         gunluk_mesai_saati=sim_mesai_saati,
+        maks_ekip_sayisi=sim_maks_ekip,
         opt_mode=sim_opt_mode,
         ariza_aktif=False,
     )
@@ -1755,6 +1763,7 @@ if active_excel_source is not None:
             p6_cip_limit=sim_p6_cip_limit,
             p6_cip_suresi=sim_p6_cip_suresi,
             gunluk_mesai_saati=sim_mesai_saati,
+            maks_ekip_sayisi=sim_maks_ekip,
             opt_mode=sim_opt_mode,
             ariza_aktif=True,
             ariza_gun=sim_ariza_gun,
@@ -1811,21 +1820,21 @@ if results is not None:
             res_max_p6 = run_scheduler_pipeline(
                 excel_source=active_excel_source, p6_debi=18.0, kultur_suresi=sim_kultur_suresi,
                 tank_cip_suresi=sim_tank_cip_suresi, max_kultur_bekleme=sim_max_kultur_bekleme, makine_max_calisma=sim_makine_max_calisma,
-                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati,
+                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati, maks_ekip_sayisi=sim_maks_ekip,
                 opt_mode=sim_opt_mode, ariza_aktif=sim_ariza_aktif, ariza_gun=sim_ariza_gun, ariza_makine=sim_ariza_makine,
                 ariza_saat_str=sim_ariza_saat_str, ariza_sure=sim_ariza_sure,
             )
             res_opt_cult = run_scheduler_pipeline(
                 excel_source=active_excel_source, p6_debi=sim_p6_debi, kultur_suresi=1.0,
                 tank_cip_suresi=sim_tank_cip_suresi, max_kultur_bekleme=sim_max_kultur_bekleme, makine_max_calisma=sim_makine_max_calisma,
-                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati,
+                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati, maks_ekip_sayisi=sim_maks_ekip,
                 opt_mode=sim_opt_mode, ariza_aktif=sim_ariza_aktif, ariza_gun=sim_ariza_gun, ariza_makine=sim_ariza_makine,
                 ariza_saat_str=sim_ariza_saat_str, ariza_sure=sim_ariza_sure,
             )
             res_both = run_scheduler_pipeline(
                 excel_source=active_excel_source, p6_debi=18.0, kultur_suresi=1.0,
                 tank_cip_suresi=sim_tank_cip_suresi, max_kultur_bekleme=sim_max_kultur_bekleme, makine_max_calisma=sim_makine_max_calisma,
-                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati,
+                p6_cip_limit=sim_p6_cip_limit, p6_cip_suresi=sim_p6_cip_suresi, gunluk_mesai_saati=sim_mesai_saati, maks_ekip_sayisi=sim_maks_ekip,
                 opt_mode=sim_opt_mode, ariza_aktif=sim_ariza_aktif, ariza_gun=sim_ariza_gun, ariza_makine=sim_ariza_makine,
                 ariza_saat_str=sim_ariza_saat_str, ariza_sure=sim_ariza_sure,
             )
@@ -1993,7 +2002,7 @@ if results is not None:
 st.markdown("---")
 st.markdown(
     f"""
-    <div style="text-align: center; color: #595959; font-size: 13px; padding-bottom: 5px;">
+    <div style="text-align: center; color: #595959; font-size: 13px; padding-bottom: 15px;">
         <b>Sütaş Karacabey Master Scheduler & Decision Support System (DSS)</b><br>
         Developer: <b>{DEVELOPER_NAME}</b><br>
         <span style="font-size: 11px; color: #8C8C8C;">© 2026 Tüm Hakları Saklıdır.</span>
