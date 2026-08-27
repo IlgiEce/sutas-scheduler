@@ -31,29 +31,29 @@ st.set_page_config(
 )
 
 # ==============================================================================
-# KULLANICI DOĞRULAMA VE OTURUM SÜRESİ LOGLAMA SİSTEMİ
+# KULLANICI DOĞRULAMA, GİRİŞ VE HATALI DENEME LOGLAMA SİSTEMİ
 # ==============================================================================
 ADMIN_PIN = "2026"
 
 
-def isim_gecerli_mi(isim: str) -> bool:
+def isim_gecerli_mi(isim: str) -> tuple[bool, str]:
     isim = isim.strip()
+    if not isim:
+        return False, "Boş İsim Girildi"
     if not re.fullmatch(r"^[a-zA-ZçÇğĞıİöÖşŞüÜ\s]+$", isim):
-        return False
+        return False, "Geçersiz Karakter (Rakam/Sembol)"
     kelimeler = isim.split()
     if len(kelimeler) < 2:
-        return False
-    # İlk kelime en az 3 harf, diğer kelimeler en az 2 harf olmalı
-    if len(kelimeler[0]) < 3 or any(len(k) < 2 for k in kelimeler[1:]):
-        return False
-    return True
+        return False, "Eksik Kelime (Tek İsim Girildi)"
+    if len(kelimeler[0]) < 3:
+        return False, f"İlk Kelime Çok Kısa ({len(kelimeler[0])} Harf)"
+    if any(len(k) < 2 for k in kelimeler[1:]):
+        return False, "İkinci/Sonraki Kelime Çok Kısa (<2 Harf)"
+    return True, "Geçerli"
 
 
-def sheet_log_giris(kullanici_etiketi: str) -> str:
-    """Kullanıcı sisteme ilk girdiğinde yeni log satırı açar ve session_id döner."""
-    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
-    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
-    session_id = f"{kullanici_etiketi}_{int(turkiye_saati.timestamp())}"
+def sheet_log_kaydet_genel(session_id: str, log_time: str, kullanici: str, durum: str, detay: str, sure: str = "-"):
+    """Google Sheets tablosuna başarılı giriş, hatalı deneme veya oturum logu yazar."""
     try:
         from streamlit_gsheets import GSheetsConnection
 
@@ -61,31 +61,46 @@ def sheet_log_giris(kullanici_etiketi: str) -> str:
         try:
             df_log = conn.read(ttl=0)
             if df_log is None or df_log.empty:
-                df_log = pd.DataFrame(columns=["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"])
+                df_log = pd.DataFrame(columns=["Session_ID", "Zaman", "Kullanıcı/Girdi", "Durum", "Hata/İşlem Detayı", "Son Görülme", "Oturum Süresi"])
         except Exception:
-            df_log = pd.DataFrame(columns=["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"])
+            df_log = pd.DataFrame(columns=["Session_ID", "Zaman", "Kullanıcı/Girdi", "Durum", "Hata/İşlem Detayı", "Son Görülme", "Oturum Süresi"])
 
-        for col in ["Session_ID", "Giriş Zamanı", "Kullanıcı", "Son Görülme", "Oturum Süresi"]:
+        for col in ["Session_ID", "Zaman", "Kullanıcı/Girdi", "Durum", "Hata/İşlem Detayı", "Son Görülme", "Oturum Süresi"]:
             if col not in df_log.columns:
                 df_log[col] = ""
 
         df_log = df_log.dropna(how="all")
         new_row = pd.DataFrame([{
             "Session_ID": session_id,
-            "Giriş Zamanı": log_time,
-            "Kullanıcı": kullanici_etiketi,
+            "Zaman": log_time,
+            "Kullanıcı/Girdi": kullanici,
+            "Durum": durum,
+            "Hata/İşlem Detayı": detay,
             "Son Görülme": log_time,
-            "Oturum Süresi": "0 dk 0 sn",
+            "Oturum Süresi": sure,
         }])
         df_updated = pd.concat([df_log, new_row], ignore_index=True)
         conn.update(data=df_updated)
     except Exception:
         pass
+
+
+def sheet_log_giris(kullanici_etiketi: str) -> str:
+    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
+    session_id = f"{kullanici_etiketi}_{int(turkiye_saati.timestamp())}"
+    sheet_log_kaydet_genel(session_id, log_time, kullanici_etiketi, "✅ Başarılı Giriş", "Sisteme Yetkili/Kullanıcı Erişimi", "0 dk 0 sn")
     return session_id
 
 
+def sheet_log_hatali_deneme(girilen_deger: str, deneme_turu: str, hata_nedeni: str):
+    turkiye_saati = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    log_time = turkiye_saati.strftime("%d-%m-%Y %H:%M:%S")
+    session_id = f"FAILED_{int(turkiye_saati.timestamp())}"
+    sheet_log_kaydet_genel(session_id, log_time, girilen_deger, f"❌ Hatalı Giriş ({deneme_turu})", hata_nedeni, "-")
+
+
 def sheet_log_guncelle():
-    """Kullanıcı sayfada kaldığı ve işlem yaptığı sürece oturum süresini günceller."""
     if "session_id" not in st.session_state or not st.session_state["session_id"]:
         return
     if "login_datetime" not in st.session_state:
@@ -140,8 +155,10 @@ if st.session_state["auth_user"] is None:
 
                 if submit_btn:
                     temiz_isim = user_name.strip()
-                    if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk kelime min 3 harf, ikinci kelime min 2 harf olmalıdır).")
+                    gecerli, hata_nedeni = isim_gecerli_mi(temiz_isim)
+                    if not gecerli:
+                        sheet_log_hatali_deneme(temiz_isim if temiz_isim else "[BOŞ]", "Kullanıcı İsmi", hata_nedeni)
+                        st.error(f"⚠️ Geçersiz İsim Formati: {hata_nedeni} (İlk kelime min 3 harf, ikinci kelime min 2 harf olmalı).")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -163,9 +180,12 @@ if st.session_state["auth_user"] is None:
 
                 if admin_submit:
                     temiz_isim = admin_name.strip()
-                    if not isim_gecerli_mi(temiz_isim):
-                        st.error("⚠️ Lütfen geçerli bir Ad ve Soyad giriniz (İlk isim min 3, soyisim min 2 harf).")
+                    gecerli, hata_nedeni = isim_gecerli_mi(temiz_isim)
+                    if not gecerli:
+                        sheet_log_hatali_deneme(temiz_isim if temiz_isim else "[BOŞ]", "Yönetici İsmi", hata_nedeni)
+                        st.error(f"⚠️ Geçersiz Yönetici İsmi: {hata_nedeni}")
                     elif pin_input != ADMIN_PIN:
+                        sheet_log_hatali_deneme(temiz_isim, "Yönetici PIN", f"Hatalı PIN Girildi ('{pin_input}')")
                         st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
                     else:
                         st.session_state["auth_user"] = f"{temiz_isim.title()} (Yönetici)"
@@ -1601,6 +1621,7 @@ with st.sidebar:
                     sheet_log_giris(f"{st.session_state['auth_user']} [Mod Yükseltme]")
                     st.rerun()
                 else:
+                    sheet_log_hatali_deneme(st.session_state["auth_user"], "Mod Yükseltme PIN", f"Hatalı PIN: '{elevate_pin}'")
                     st.error("❌ Hatalı PIN!")
 
     st.markdown("---")
