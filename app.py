@@ -159,7 +159,7 @@ if st.session_state["auth_user"] is None:
                     gecerli, hata_nedeni = isim_gecerli_mi(temiz_isim)
                     if not gecerli:
                         sheet_log_hatali_deneme(temiz_isim if temiz_isim else "[BOŞ]", "Kullanıcı İsmi", hata_nedeni)
-                        st.error(f"⚠️ Geçersiz İsim Formatı: {hata_nedeni} (İlk kelime min 3 harf, ikinci kelime min 2 harf olmalı).")
+                        st.error("⚠️ Lütfen adınızı ve soyadınızı giriniz.")
                     else:
                         st.session_state["auth_user"] = temiz_isim.title()
                         st.session_state["is_admin"] = False
@@ -184,7 +184,7 @@ if st.session_state["auth_user"] is None:
                     gecerli, hata_nedeni = isim_gecerli_mi(temiz_isim)
                     if not gecerli:
                         sheet_log_hatali_deneme(temiz_isim if temiz_isim else "[BOŞ]", "Yönetici İsmi", hata_nedeni)
-                        st.error(f"⚠️ Geçersiz Yönetici İsmi: {hata_nedeni}")
+                        st.error("⚠️ Lütfen adınızı ve soyadınızı giriniz.")
                     elif pin_input != ADMIN_PIN:
                         sheet_log_hatali_deneme(temiz_isim, "Yönetici PIN", f"Hatalı PIN Girildi ('{pin_input}')")
                         st.error("❌ Hatalı yönetici kodu! Lütfen tekrar deneyin.")
@@ -202,7 +202,6 @@ if st.session_state["auth_user"] is None:
 
     st.stop()
 
-# Sayfa her yenilendiğinde aktif kalma süresini güncelle
 sheet_log_guncelle()
 
 # ==============================================================================
