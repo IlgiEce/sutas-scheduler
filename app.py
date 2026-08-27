@@ -129,7 +129,7 @@ if st.session_state["auth_user"] is None:
     st.stop()
 
 # ==============================================================================
-# TESİS, MAKİNE & HIZ MATRİSİ YAPILANDIRMASI
+# MEVCUT UYGULAMA TANIMLARI
 # ==============================================================================
 plt.rcParams["font.sans-serif"] = "DejaVu Sans"
 plt.rcParams["axes.edgecolor"] = "#D9D9D9"
@@ -274,7 +274,54 @@ def create_excel_stream_from_dict(factory_dict):
     return buf
 
 
-def isgucu_katsayisi_getir(makine_adi):
+def default_excel_stream():
+    for f_name in ["123123.xlsx", "haftalik_projeksiyon.xlsx", "Sutas_Projeksiyon.xlsx"]:
+        if os.path.exists(f_name):
+            with open(f_name, "rb") as f:
+                return io.BytesIO(f.read())
+    return create_excel_stream_from_dict(DEFAULT_FACTORY_DATA)
+
+
+# Resmî Hız ve Verimlilik Tablosu ile Tam Eşleşme
+def hiz_matrisini_yukle():
+    return {
+        "160 çap": {
+            "750g": {"hiz": 3.024, "sut_tipi": "TAM YAĞLI"},
+            "1000g": {"hiz": 3.648, "sut_tipi": "TAM YAĞLI"},
+            "1250g": {"hiz": 4.08, "sut_tipi": "%5 YAĞLI"},
+            "1500g": {"hiz": 4.032, "sut_tipi": "YAĞLI"},
+        },
+        "132 çap": {
+            "500g": {"hiz": 2.457, "sut_tipi": "TAM YAĞLI"},
+            "600g": {"hiz": 2.9484, "sut_tipi": "TAM YAĞLI"},
+            "650g": {"hiz": 3.1941, "sut_tipi": "YARIM YAĞLI"},
+            "750g": {"hiz": 3.6855, "sut_tipi": "%5 YAĞLI"},
+        },
+        "Grunwald": {
+            "95 çap - 200g": {"hiz": 1.632, "sut_tipi": "TAM YAĞLI"},
+            "75 çap - 200g (Tam)": {"hiz": 2.1216, "sut_tipi": "TAM YAĞLI"},
+            "75 çap - 200g (Yarım)": {"hiz": 2.1216, "sut_tipi": "YARIM YAĞLI"},
+            "75 çap - 150g": {"hiz": 1.836, "sut_tipi": "YARIM YAĞLI"},
+        },
+        "Küçük Kova": {
+            "10000g (Tam)": {"hiz": 6.768, "sut_tipi": "TAM YAĞLI"},
+            "10000g (Yarım)": {"hiz": 6.768, "sut_tipi": "YARIM YAĞLI"},
+            "10000g (Paksüt)": {"hiz": 6.768, "sut_tipi": "PAKSÜT"},
+            "5000g": {"hiz": 5.64, "sut_tipi": "YARIM YAĞLI"},
+        },
+        "Büyük Kova": {
+            "2000g": {"hiz": 3.192, "sut_tipi": "YAĞLI"},
+            "10000g (Tam)": {"hiz": 5.415, "sut_tipi": "TAM YAĞLI"},
+            "10000g (Yarım)": {"hiz": 5.415, "sut_tipi": "YARIM YAĞLI"},
+            "10000g (Paksüt)": {"hiz": 5.415, "sut_tipi": "PAKSÜT"},
+        },
+    }
+
+
+MAKINE_HIZLARI = hiz_matrisini_yukle()
+
+
+def isgucu_katsayisi_getir(makine_adi, gramaj_adi=""):
     if makine_adi == "160 çap":
         return 4.0
     elif makine_adi == "132 çap":
@@ -288,6 +335,7 @@ def isgucu_katsayisi_getir(makine_adi):
     return 4.0
 
 
+# Resmî Makine-Kalıp-Gramaj Eşleşme Fonksiyonu
 def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
     u = str(urun_adi).upper()
     st_col = str(sut_tipi_col).upper()
@@ -305,43 +353,43 @@ def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
     else:
         st = "TAM YAĞLI"
 
-    # Tabloya birebir kilitli makine hedefi ve gramaj ayrımı
+    # Tabloya Göre Kesin Makine Eşleşmeleri
     if "10000" in u or "10 KG" in u or "10KG" in u or g_str == "10000":
         g = "10000g"
-        m = "KOVA_10KG"
-    elif "5000" in u or "5 KG" in u or "5KG" in u or g_str == "5000" or "3000" in u or "3 KG" in u or g_str == "3000":
+        m = "KOVA_10KG"  # Küçük Kova (6.768) veya Büyük Kova (5.415)
+    elif "5000" in u or "5 KG" in u or "5KG" in u or g_str == "5000" or "3000" in u or "3 KG" in u or "3kg" in u or g_str == "3000":
         g = "5000g"
-        m = "Küçük Kova"  # 5000g tablonuzda yalnızca Küçük Kova hattında tanımlı
+        m = "Küçük Kova"  # Tablo: 5000g yalnızca Küçük Kova (5.64 T/Sa, Yarım Yağlı)
     elif "2000" in u or "2 KG" in u or "2kg" in u or g_str == "2000":
         g = "2000g"
-        m = "Büyük Kova"  # 2000g kesinlikle sadece Büyük Kova'ya atanır
+        m = "Büyük Kova"  # Tablo: 2000g yalnızca Büyük Kova (3.192 T/Sa, Yağlı)
     elif "1500" in u or g_str == "1500":
         g = "1500g"
-        m = "160 çap"
+        m = "160 çap"     # Tablo: 1500g 160 Çap (4.032 T/Sa, Yağlı)
     elif "1250" in u or g_str == "1250":
         g = "1250g"
-        m = "160 çap"
+        m = "160 çap"     # Tablo: 1250g 160 Çap (4.08 T/Sa, %5 Yağlı)
     elif "1000" in u or g_str == "1000":
         g = "1000g"
-        m = "160 çap"
+        m = "160 çap"     # Tablo: 1000g 160 Çap (3.648 T/Sa, Tam Yağlı)
     elif "750" in u or g_str == "750":
         g = "750g"
         m = "160 çap" if st in ["TAM YAĞLI", "%5 YAĞLI"] else "132 çap"
     elif "650" in u or g_str == "650":
         g = "650g"
-        m = "132 çap"
+        m = "132 çap"     # Tablo: 650g 132 Çap (3.1941 T/Sa, Yarım Yağlı)
     elif "600" in u or g_str == "600":
         g = "600g"
-        m = "132 çap"
+        m = "132 çap"     # Tablo: 600g 132 Çap (2.9484 T/Sa, Tam Yağlı)
     elif "500" in u or g_str == "500":
         g = "500g"
-        m = "132 çap"
+        m = "132 çap"     # Tablo: 500g 132 Çap (2.457 T/Sa, Tam Yağlı)
     elif "200" in u or g_str == "200":
         m = "Grunwald"
-        g = "95 çap - 200g" if ("95" in u or "95 ÇAP" in u) else "75 çap - 200g"
+        g = "95 çap - 200g" if ("95" in u or "95 ÇAP" in u) else ("75 çap - 200g (Tam)" if st == "TAM YAĞLI" else "75 çap - 200g (Yarım)")
     elif "150" in u or g_str == "150" or "125" in u or "4X125" in u:
         g = "75 çap - 150g"
-        m = "Grunwald"
+        m = "Grunwald"    # Tablo: 150g Grunwald (1.836 T/Sa, Yarım Yağlı)
     else:
         g = "1000g"
         m = "160 çap"
@@ -349,25 +397,31 @@ def sut_tipi_ve_gramaj_tespit(urun_adi, sut_tipi_col="", gramaj_col=""):
     return st, g, m
 
 
-def makine_hizi_getir(makine_adi, gramaj_adi):
-    if makine_adi == "160 çap":
-        if "750" in gramaj_adi:
+def makine_hizi_getir(makine_adi, gramaj_adi, sut_tipi):
+    if makine_adi == "Küçük Kova":
+        return 5.64 if "5000" in str(gramaj_adi) else 6.768
+    elif makine_adi == "Büyük Kova":
+        if "2000" in str(gramaj_adi):
+            return 3.192
+        return 5.415
+    elif makine_adi == "160 çap":
+        if "750" in str(gramaj_adi):
             return 3.024
-        if "1000" in gramaj_adi:
+        if "1000" in str(gramaj_adi):
             return 3.648
-        if "1250" in gramaj_adi:
-            return 4.080
-        if "1500" in gramaj_adi:
+        if "1250" in str(gramaj_adi):
+            return 4.08
+        if "1500" in str(gramaj_adi):
             return 4.032
         return 3.648
     elif makine_adi == "132 çap":
-        if "500" in gramaj_adi:
+        if "500" in str(gramaj_adi):
             return 2.457
-        if "600" in gramaj_adi:
+        if "600" in str(gramaj_adi):
             return 2.9484
-        if "650" in gramaj_adi:
+        if "650" in str(gramaj_adi):
             return 3.1941
-        if "750" in gramaj_adi:
+        if "750" in str(gramaj_adi):
             return 3.6855
         return 2.9484
     elif makine_adi == "Grunwald":
@@ -376,29 +430,17 @@ def makine_hizi_getir(makine_adi, gramaj_adi):
         if "150" in str(gramaj_adi):
             return 1.836
         return 2.1216
-    elif makine_adi == "Küçük Kova":
-        if "5000" in gramaj_adi:
-            return 5.640
-        return 6.768
-    elif makine_adi == "Büyük Kova":
-        if "2000" in gramaj_adi:
-            return 3.192
-        return 5.415
     return 3.5
 
 
-def sut_tipi_toplam_hiz_getir(sut_tipi):
-    if sut_tipi == "TAM YAĞLI":
-        return 14.5
-    elif sut_tipi == "YARIM YAĞLI":
-        return 11.5
-    elif sut_tipi == "%5 YAĞLI":
-        return 7.7
-    elif sut_tipi == "PAKSÜT":
-        return 12.18
-    elif sut_tipi == "YAĞLI":
-        return 7.22
-    return 8.0
+def sut_tipi_toplam_hiz_getir(sut_tipi, makineler):
+    tot = 0.0
+    for m in makineler:
+        for g, bil in MAKINE_HIZLARI[m].items():
+            if bil["sut_tipi"] == sut_tipi:
+                tot += bil["hiz"]
+                break
+    return max(2.5, tot)
 
 
 def dinamik_projeksiyon_oku(excel_source, sheet_name):
@@ -511,11 +553,11 @@ def gunluk_tank_hazirligi_v80(
 
     if day_idx == 1:
         for idx, (tk_name, cap) in enumerate(tank_list):
-            st_val = assigned_types[idx % len(assigned_types)]
+            st = assigned_types[idx % len(assigned_types)]
             tanks[tk_name] = {
                 "kapasite": cap,
                 "mevcut_sut": cap,
-                "sut_tipi": st_val,
+                "sut_tipi": st,
                 "cip_musait_zaman": gun_baslangic - datetime.timedelta(hours=6),
                 "dolum_bitis": gun_baslangic - datetime.timedelta(hours=2),
                 "kultur_saati": gun_baslangic - datetime.timedelta(hours=kultur_suresi),
@@ -526,7 +568,7 @@ def gunluk_tank_hazirligi_v80(
                 "Gün": f"GÜN {day_idx} ({day_name})",
                 "Tank": tk_name,
                 "Kapasite (Ton)": cap,
-                "Süt Tipi": st_val,
+                "Süt Tipi": st,
                 "Önceki Gün Boşalma": "-",
                 "Tank CIP Bitiş": "-",
                 "P6 Dolum Başlangıç": (gun_baslangic - datetime.timedelta(hours=4.0)).strftime("%d-%m %H:%M"),
@@ -535,6 +577,7 @@ def gunluk_tank_hazirligi_v80(
             })
         return tanks
 
+    # Sıralı Tank CIP ve Kesin Tek Hat P6 Dolumu
     sorted_tanks = sorted(
         tank_list,
         key=lambda item: tank_states.get(item[0], {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14)),
@@ -553,10 +596,12 @@ def gunluk_tank_hazirligi_v80(
         st_req = assigned_types[idx % len(assigned_types)]
         t_bosaldi = tank_states.get(tk_name, {}).get("bosalma_saati", gun_baslangic - datetime.timedelta(hours=14))
         
+        # 1. Tank boşaldığı an CIP başlar (Eşzamanlı çakışma olmadan)
         t_cip_start = max(t_bosaldi, current_tank_cip_available)
         t_cip_done = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
         current_tank_cip_available = t_cip_done
 
+        # 2. P6 Dolumu (Önceki tankın dolumu BİTMEDEN başlayamaz)
         dolum_h = cap / p6_debi
         t_p6_earliest = max(t_cip_done, current_p6_available)
 
@@ -686,6 +731,7 @@ def run_scheduler_pipeline(
     toplam_talep_genel = 0.0
     toplam_gerceklesen_genel = 0.0
     toplam_eksik_genel = 0.0
+    toplam_efektif_p6_saati = 0.0
 
     for day_idx, sheet_name in enumerate(xls.sheet_names, 1):
         gun_baslangic = baslangic_gunu + datetime.timedelta(days=day_idx - 1)
@@ -816,7 +862,7 @@ def run_scheduler_pipeline(
                     m_info["musait_zamani"] = min(future_ends)
                     continue
 
-            # Tank Hazır Süt Listesi (Aynı tank birden çok makineyi besleyebilir, ama süt tipi tektir)
+            # Tank Hazır Süt Listesi (Aynı tank birden çok makineyi besleyebilir)
             ready_st_list = [
                 tv["sut_tipi"] for tk, tv in tanks.items()
                 if tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (current_time - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -846,11 +892,12 @@ def run_scheduler_pipeline(
             pending_o = matching_orders[0]
             st_req = pending_o["süt_tipi"]
             g_req = pending_o["gramaj"]
-            hiz = makine_hizi_getir(chosen_m_name, g_req)
+            hiz = makine_hizi_getir(chosen_m_name, g_req, st_req)
 
             p_start = m_info["musait_zamani"]
             cip_notu = ""
 
+            # Makine İçi CIP: 8.5 saat kesintisiz dolum tamamlandığında tetiklenir
             if m_info["ardisik_calisma_saat"] >= makine_max_calisma and p_start > gun_baslangic:
                 hat = CIP_HATLARI[chosen_m_name]
                 cip_sure_dk = CIP_SURELERI_DK[chosen_m_name]
@@ -863,7 +910,7 @@ def run_scheduler_pipeline(
                 p_start = cip_bitis
                 cip_notu += f" | 🧼 Makine CIP ({hat}: {cip_sure_dk} dk)"
 
-            # Tank Eşleştirme (Süt tipi izolasyonu kilitli)
+            # Tank Eşleştirme (Aynı tanktan birden fazla makine eşzamanlı çekebilir)
             matching_tanks = [
                 (tk, tv) for tk, tv in tanks.items()
                 if tv["sut_tipi"] == st_req and tv["mevcut_sut"] > MIN_SUT_LIMITI_TON and (p_start - tv["hazir_saat"]).total_seconds() / 3600.0 <= max_kultur_bekleme
@@ -880,15 +927,15 @@ def run_scheduler_pipeline(
                 refill_t_name, refill_info = sorted_by_empty[0]
                 t_bosaldi = refill_info["bosalma_saati"]
 
-                # Sıralı Tank Yıkama
+                # Sıralı Tank Yıkama: Boşaldığı an başlar
                 t_cip_start = max(t_bosaldi, tank_cip_musaitlik)
                 t_cip_end = t_cip_start + datetime.timedelta(hours=tank_cip_suresi)
                 tank_cip_musaitlik = t_cip_end
                 refill_info["cip_musait_zaman"] = t_cip_end
 
-                # P6 TEK HAT SIRALI DOLUM KURALI
+                # Kesin P6 Tek Hat Kuralı: Önceki dolum bitmeden yenisi başlayamaz
                 t_p6_start_earliest = max(t_cip_end, p6_state["musaitlik"])
-                toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req)
+                toplam_st_hizi = sut_tipi_toplam_hiz_getir(st_req, MAKINE_LISTESI)
 
                 tam_dolum_suresi = TANK_KAPASITELERI[refill_t_name] / p6_debi
                 t_hazir_tahmini = t_p6_start_earliest + datetime.timedelta(hours=tam_dolum_suresi + kultur_suresi)
@@ -1043,7 +1090,7 @@ def run_scheduler_pipeline(
             schedule.append(bakim_satiri)
             all_schedule_rows.append(bakim_satiri)
 
-        # İşgücü İhtiyacı: Saat saat, aktif çalışan her makinenin katsayısı toplanarak hesaplanır
+        # İşgücü İhtiyacı: Saat saat, makine makine toplanarak hesaplanır
         for h_i in range(mesai_h):
             saat_bas = gun_baslangic + datetime.timedelta(hours=h_i)
             saat_bit = saat_bas + datetime.timedelta(hours=1)
@@ -1097,11 +1144,21 @@ def run_scheduler_pipeline(
         toplam_gerceklesen_genel += day_realized
         toplam_eksik_genel += day_unfulfilled
 
+        p6_day_pumping_hours = day_realized / p6_debi
+        p6_cip_count = max(0, int(day_realized // p6_cip_limit))
+        p6_cip_hours = p6_cip_count * p6_cip_suresi
+        tank_transition_hours = 0.60
+
+        day_efektif_p6_hours = min(gunluk_mesai_saati, p6_day_pumping_hours + p6_cip_hours + tank_transition_hours)
+        toplam_efektif_p6_saati += day_efektif_p6_hours
+        p6_efektif_doygunluk = min(100.0, (day_efektif_p6_hours / gunluk_mesai_saati) * 100.0)
+
         gunduz_ekip, gece_ekip = vardiya_ekip_ortalamasi_hesapla(machines, gun_baslangic, mesai_saati=gunluk_mesai_saati)
 
         oee_raporu.append({
             "gun": f"GÜN {day_idx}",
             "order_count": actual_order_count,
+            "p6_oee": round(p6_efektif_doygunluk, 1),
             "demand": total_day_demand,
             "realized": day_realized,
             "unfulfilled": day_unfulfilled,
@@ -1140,8 +1197,17 @@ def run_scheduler_pipeline(
     ort_gerceklesen = toplam_gerceklesen_genel / max(1, gun_sayisi)
     ort_eksik = toplam_eksik_genel / max(1, gun_sayisi)
 
+    genel_p6_doygunluk = min(100.0, (toplam_efektif_p6_saati / (gun_sayisi * gunluk_mesai_saati)) * 100.0)
+    genel_uyum = (toplam_gerceklesen_genel / max(0.01, toplam_talep_genel)) * 100
     ort_gunduz_ekip = round(sum(toplam_gunduz_ekip_list) / max(1, len(toplam_gunduz_ekip_list)), 1)
     ort_gece_ekip = round(sum(toplam_gece_ekip_list) / max(1, len(toplam_gece_ekip_list)), 1)
+
+    doygunluk_gece = min(100.0, round(92.5 * (10.0 / p6_debi) * (kultur_suresi / 1.5) * (tank_cip_suresi / 1.0), 1))
+    doygunluk_p6 = round(genel_p6_doygunluk, 1)
+    doygunluk_tanklar = min(100.0, round(74.0 * (ort_gerceklesen / 163.2) * (kultur_suresi / 1.5) * (20.0 / gunluk_mesai_saati), 1))
+    doygunluk_makineler = min(100.0, round((toplam_gerceklesen_genel / (340.0 * gun_sayisi * (gunluk_mesai_saati / 20.0))) * 100, 1))
+    tonaj_carpan = ort_gerceklesen / 163.2
+    doygunluk_cip = min(100.0, round(25.0 * tonaj_carpan * (8.5 / makine_max_calisma) * (20.0 / gunluk_mesai_saati), 1))
 
     kpi_rows.append({
         "Gün / Üretim Sayfası": "📊 HAFTALIK GENEL ORTALAMA",
@@ -1291,13 +1357,6 @@ def run_scheduler_pipeline(
 
     fig_db1, ax_db1 = plt.subplots(figsize=(10.5, 4.0), dpi=200)
     fig_db1.patch.set_facecolor("#FFFFFF")
-    
-    doygunluk_cip = min(100.0, round(25.0 * (ort_gerceklesen / 163.2) * (8.5 / makine_max_calisma) * (20.0 / gunluk_mesai_saati), 1))
-    doygunluk_makineler = min(100.0, round((toplam_gerceklesen_genel / (340.0 * gun_sayisi * (gunluk_mesai_saati / 20.0))) * 100, 1))
-    doygunluk_tanklar = min(100.0, round(74.0 * (ort_gerceklesen / 163.2) * (kultur_suresi / 1.5) * (20.0 / gunluk_mesai_saati), 1))
-    doygunluk_p6 = min(100.0, round((ort_gerceklesen / (p6_debi * 20.0)) * 100, 1))
-    doygunluk_gece = min(100.0, round(92.5 * (10.0 / p6_debi) * (kultur_suresi / 1.5) * (tank_cip_suresi / 1.0), 1))
-
     stations = ["CIP Yıkama Devreleri (Hat 1 & 2)", "Dolum Makineleri Parkı (5 Hat)", "Mayalama / Kültür Tank Parkı (113T)", f"P6 Pastörizatör ({p6_debi} Ton/Sa)", "Gece Hazırlığı (04:00 - 08:00)"]
     oee_v = [doygunluk_cip, doygunluk_makineler, doygunluk_tanklar, doygunluk_p6, doygunluk_gece]
     colors_db = ["#FFC000", "#70AD47", "#ED7D31", "#C00000", "#C00000"]
@@ -1429,6 +1488,8 @@ def run_scheduler_pipeline(
         "gunluk_cizelgeler": gunluk_cizelgeler,
         "gunluk_eksikler": gunluk_eksikler,
         "df_audit": df_audit,
+        "genel_uyum": genel_uyum,
+        "genel_p6_oee": genel_p6_doygunluk,
         "ort_gerceklesen": ort_gerceklesen,
         "toplam_talep_genel": toplam_talep_genel,
         "toplam_gerceklesen_genel": toplam_gerceklesen_genel,
@@ -1595,8 +1656,8 @@ with st.sidebar:
         st.markdown("""
         * **Küçük Kova:** 10 KG (6.77 T/Sa) | 5 KG (5.64 T/Sa)
         * **Büyük Kova:** 10 KG (5.42 T/Sa) | 2 KG (3.19 T/Sa)
-        * **160 çap:** 750g (3.02 T/Sa) | 1000g (3.65 T/Sa) | 1250g (4.08 T/Sa) | 1500g (4.03 T/Sa)
-        * **132 çap:** 500g (2.46 T/Sa) | 600g (2.95 T/Sa) | 650g (3.19 T/Sa) | 750g (3.69 T/Sa)
+        * **160 çap:** 1000g (3.65 T/Sa) | 1250g (4.08 T/Sa) | 1500g (4.03 T/Sa)
+        * **132 çap:** 500g (2.46 T/Sa) | 600g (2.95 T/Sa) | 650g (3.19 T/Sa)
         * **Grunwald:** 75 çap (2.12 T/Sa) | 95 çap (1.63 T/Sa) | 150g (1.84 T/Sa)
         """)
 
@@ -1620,7 +1681,7 @@ with st.sidebar:
     )
 
 # ==============================================================================
-# HAM VERİ DÜZENLEME EKRANI
+# HAM VERİ DÜZENLEME EKRANI (TÜMÜNÜ SEÇ/SİL EKLENDİ)
 # ==============================================================================
 if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme (Yönetici)":
     st.subheader("✏️ Fabrika Haftalık Sipariş Projeksiyonunu Düzenle")
@@ -1674,7 +1735,7 @@ if st.session_state["is_admin"] and veri_secenegi == "✏️ Ham Veri Düzenleme
     st.markdown("---")
 
 # ==============================================================================
-# REAKTİF OPTİMİZASYON VE HESAPLAMA MOTORU
+# REAKTİF OPTİMİZASYON VE HESAPLAMA MOTORU (ARIZA MONOTONLUĞU DAHİL)
 # ==============================================================================
 if active_excel_source is not None:
     base_res = run_scheduler_pipeline(
@@ -1879,7 +1940,6 @@ if results is not None:
                 "YARIM YAĞLI": "#2E75B6",
                 "%5 YAĞLI": "#548235",
                 "PAKSÜT": "#C55A11",
-                "YAĞLI": "#70AD47",
                 "DURUŞ": "#C00000",
             }
 
